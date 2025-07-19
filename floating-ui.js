@@ -15,6 +15,26 @@ class FloatingUI {
         };
         
         this.logger.info('FloatingUI', 'Initializing floating UI');
+        
+        // Debug: Check what styles are in the shadow root
+        const styles = this.shadowRoot.querySelectorAll('style');
+        const links = this.shadowRoot.querySelectorAll('link');
+        
+        console.log('FLOATING-UI: Found styles in shadow:', styles.length);
+        if (styles[0]) {
+            console.log('FLOATING-UI: First style content preview:', styles[0].textContent.substring(0, 200));
+            console.log('FLOATING-UI: Style contains dark bg?', styles[0].textContent.includes('rgba(32, 34, 37, 0.95)'));
+        }
+        
+        this.logger.info('FloatingUI', 'Shadow DOM style elements', {
+            styleCount: styles.length,
+            linkCount: links.length,
+            firstStyleLength: styles[0] ? styles[0].textContent.length : 0
+        });
+        
+        // Force browser to process styles before rendering
+        this.shadowRoot.offsetHeight;
+        
         this.render();
         
         // Wait for DOM to be ready before setting up event listeners
@@ -71,14 +91,28 @@ class FloatingUI {
                     
                     <div class="transcription-section">
                         <div class="transcription-pane">
-                            <h3>You</h3>
+                            <div class="pane-header">
+                                <h3>You</h3>
+                                <button class="clear-btn" data-target="user-transcription" title="Clear">
+                                    <svg width="14" height="14" viewBox="0 0 14 14">
+                                        <path d="M14 1.41L12.59 0L7 5.59L1.41 0L0 1.41L5.59 7L0 12.59L1.41 14L7 8.41L12.59 14L14 12.59L8.41 7L14 1.41Z" fill="currentColor"/>
+                                    </svg>
+                                </button>
+                            </div>
                             <div class="transcription-content" id="user-transcription">
                                 <p class="placeholder">Your speech will appear here...</p>
                             </div>
                         </div>
                         <div class="divider"></div>
                         <div class="transcription-pane">
-                            <h3>Others</h3>
+                            <div class="pane-header">
+                                <h3>Others</h3>
+                                <button class="clear-btn" data-target="others-transcription" title="Clear">
+                                    <svg width="14" height="14" viewBox="0 0 14 14">
+                                        <path d="M14 1.41L12.59 0L7 5.59L1.41 0L0 1.41L5.59 7L0 12.59L1.41 14L7 8.41L12.59 14L14 12.59L8.41 7L14 1.41Z" fill="currentColor"/>
+                                    </svg>
+                                </button>
+                            </div>
                             <div class="transcription-content" id="others-transcription">
                                 <p class="placeholder">Others' speech will appear here...</p>
                             </div>
@@ -103,8 +137,50 @@ class FloatingUI {
             </div>
         `;
         
+        // Check styles before innerHTML
+        console.log('FLOATING-UI: Style elements BEFORE innerHTML:', this.shadowRoot.querySelectorAll('style').length);
+        
+        // Save existing style elements before innerHTML wipes them out
+        const existingStyles = Array.from(this.shadowRoot.querySelectorAll('style'));
+        
+        // Set innerHTML (this will clear everything)
         this.shadowRoot.innerHTML = html;
+        
+        // Re-append the saved style elements
+        existingStyles.forEach(style => {
+            this.shadowRoot.appendChild(style);
+        });
+        
+        // Check styles after innerHTML - should be restored now!
+        console.log('FLOATING-UI: Style elements AFTER innerHTML:', this.shadowRoot.querySelectorAll('style').length);
+        
         this.widget = this.shadowRoot.getElementById('floating-widget');
+        
+        // Debug: Check computed styles
+        setTimeout(() => {
+            if (this.widget) {
+                const computedStyle = window.getComputedStyle(this.widget);
+                const rootComputedStyle = window.getComputedStyle(this.shadowRoot.host);
+                
+                console.log('FLOATING-UI: Widget element exists:', !!this.widget);
+                console.log('FLOATING-UI: Widget computed backgroundColor:', computedStyle.backgroundColor);
+                console.log('FLOATING-UI: Widget inline style:', this.widget.getAttribute('style'));
+                
+                // Check if any styles are actually applied to the widget
+                const allStyles = this.shadowRoot.querySelectorAll('style');
+                console.log('FLOATING-UI: Total style elements in shadow at render time:', allStyles.length);
+                
+                this.logger.info('FloatingUI', 'Widget computed styles', {
+                    background: computedStyle.background,
+                    backgroundColor: computedStyle.backgroundColor,
+                    opacity: computedStyle.opacity,
+                    visibility: computedStyle.visibility,
+                    display: computedStyle.display,
+                    cssVarBgDark: computedStyle.getPropertyValue('--bg-dark'),
+                    rootCssVarBgDark: rootComputedStyle.getPropertyValue('--bg-dark')
+                });
+            }
+        }, 100);
         
         this.logger.info('FloatingUI', 'UI rendered');
     }
@@ -179,6 +255,23 @@ class FloatingUI {
         // Global mouse events for dragging
         document.addEventListener('mousemove', this.drag.bind(this));
         document.addEventListener('mouseup', this.stopDrag.bind(this));
+        
+        // Clear buttons
+        const clearButtons = this.shadowRoot.querySelectorAll('.clear-btn');
+        clearButtons.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const targetId = btn.getAttribute('data-target');
+                this.clearTranscription(targetId);
+            });
+        });
+    }
+    
+    clearTranscription(targetId) {
+        const element = this.shadowRoot.getElementById(targetId);
+        if (element) {
+            element.innerHTML = '<p class="placeholder">Cleared. New transcriptions will appear here...</p>';
+            this.logger.info('FloatingUI', `Cleared transcriptions for ${targetId}`);
+        }
     }
 
     setupTranscriptionListener() {
@@ -401,25 +494,63 @@ class FloatingUI {
         }
         
         if (isFinal) {
-            // Add final transcription
-            const p = document.createElement('p');
-            p.className = 'transcription-text';
-            p.textContent = text;
-            element.appendChild(p);
+            // Remove any interim transcription
+            const interim = element.querySelector('.interim');
+            if (interim) {
+                interim.remove();
+            }
+            
+            // Add final transcription with timestamp
+            const transcriptionDiv = document.createElement('div');
+            transcriptionDiv.className = 'transcription-entry';
+            
+            const timestamp = document.createElement('span');
+            timestamp.className = 'timestamp';
+            timestamp.textContent = new Date().toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            
+            const textSpan = document.createElement('span');
+            textSpan.className = 'transcription-text';
+            textSpan.textContent = text;
+            
+            transcriptionDiv.appendChild(timestamp);
+            transcriptionDiv.appendChild(textSpan);
+            element.appendChild(transcriptionDiv);
             
             // Auto-scroll to bottom
             element.scrollTop = element.scrollHeight;
             
             this.logger.info('FloatingUI', 'Added final transcription', { source, text });
         } else {
-            // Update interim transcription
+            // Update or create interim transcription
             let interim = element.querySelector('.interim');
             if (!interim) {
-                interim = document.createElement('p');
-                interim.className = 'transcription-text interim';
+                // Remove any existing interim first
+                const existingInterim = element.querySelector('.interim');
+                if (existingInterim) {
+                    existingInterim.remove();
+                }
+                
+                interim = document.createElement('div');
+                interim.className = 'transcription-entry interim';
+                
+                const textSpan = document.createElement('span');
+                textSpan.className = 'transcription-text';
+                interim.appendChild(textSpan);
+                
                 element.appendChild(interim);
             }
-            interim.textContent = text;
+            
+            const textSpan = interim.querySelector('.transcription-text');
+            if (textSpan) {
+                textSpan.textContent = text;
+            }
+            
+            // Auto-scroll to bottom
+            element.scrollTop = element.scrollHeight;
             
             this.logger.debug('FloatingUI', 'Updated interim transcription', { source, text });
         }

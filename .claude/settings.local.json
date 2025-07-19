@@ -3,7 +3,8 @@
     "allow": [
       "WebFetch(domain:developers.deepgram.com)",
       "Bash(ls:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(wc:*)"
     ],
     "deny": []
   }
