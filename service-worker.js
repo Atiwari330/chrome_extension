@@ -18,9 +18,32 @@ class TranscriptionService {
     }
 
     async init() {
+        // Check permissions
+        console.log('[Service Worker] Checking extension permissions...');
+        const manifest = chrome.runtime.getManifest();
+        console.log('[Service Worker] Extension permissions:', {
+            permissions: manifest.permissions,
+            hasTabCapture: manifest.permissions.includes('tabCapture'),
+            hostPermissions: manifest.host_permissions
+        });
+        
+        // Load granted tabs from storage
+        try {
+            const stored = await chrome.storage.session.get(['grantedTabs']);
+            if (stored.grantedTabs && Array.isArray(stored.grantedTabs)) {
+                stored.grantedTabs.forEach(tabId => grantedTabs.add(tabId));
+                console.log('[Service Worker] Loaded granted tabs from storage:', stored.grantedTabs);
+            }
+        } catch (error) {
+            console.log('[Service Worker] Could not load granted tabs:', error);
+        }
+        
         // Load API key from storage
         const result = await chrome.storage.local.get(['deepgramApiKey']);
         this.apiKey = result.deepgramApiKey;
+        
+        // Hardcode API key
+        this.apiKey = 'ea2f05e0565364f93936d157fc4b7d20ac06691b';
         
         if (this.apiKey) {
             console.log('[Service Worker] API key loaded successfully');
@@ -75,6 +98,14 @@ class TranscriptionService {
             try {
                 const data = JSON.parse(event.data);
                 
+                if (source === 'others') {
+                    console.log(`[Service Worker] TAB WebSocket message received:`, {
+                        type: data.type,
+                        hasTranscript: !!data.channel?.alternatives?.[0]?.transcript,
+                        isFinal: data.is_final
+                    });
+                }
+                
                 if (data.type === 'Results') {
                     const transcript = data.channel?.alternatives?.[0]?.transcript;
                     
@@ -82,13 +113,19 @@ class TranscriptionService {
                         // Send transcription to content script
                         this.sendTranscriptionUpdate(source, transcript, data.is_final);
                         
-                        console.log(`[Service Worker] Transcription (${source}): ${transcript}`);
+                        if (source === 'others') {
+                            console.log(`[Service Worker] TAB Transcription (${source}): "${transcript}" (final: ${data.is_final})`);
+                        } else {
+                            console.log(`[Service Worker] Transcription (${source}): ${transcript}`);
+                        }
+                    } else if (source === 'others') {
+                        console.log(`[Service Worker] TAB WebSocket Results with no transcript`);
                     }
                 } else if (data.type === 'Metadata') {
-                    console.log(`[Service Worker] Metadata received:`, data);
+                    console.log(`[Service Worker] Metadata received for ${source}:`, data);
                 }
             } catch (error) {
-                console.error('[Service Worker] Error parsing message:', error);
+                console.error(`[Service Worker] Error parsing ${source} message:`, error);
             }
         };
 
@@ -152,6 +189,7 @@ class TranscriptionService {
             console.error(`[Service Worker] Reconnection failed for ${source}:`, error);
         }
     }
+    
 
     async handleTabAudioCapture() {
         try {
@@ -162,20 +200,84 @@ class TranscriptionService {
                 throw new Error('No active tab found');
             }
             
-            console.log('[Service Worker] Capturing tab audio from tab:', tab.id);
+            // Check if tab has been granted permission
+            if (!grantedTabs.has(tab.id)) {
+                console.error('[Service Worker] Tab permission not granted. User must click extension icon first.');
+                throw new Error('Tab permission not granted. Please click the extension icon to grant permission for this tab.');
+            }
+            
+            // Check if URL is capturable
+            const isSpecialUrl = tab.url.startsWith('chrome://') || 
+                               tab.url.startsWith('chrome-extension://') || 
+                               tab.url.startsWith('edge://') ||
+                               tab.url.startsWith('about:') ||
+                               tab.url.startsWith('file://');
+            
+            console.log('[Service Worker] TAB AUDIO CAPTURE - Tab details:', {
+                tabId: tab.id,
+                url: tab.url,
+                title: tab.title,
+                active: tab.active,
+                audible: tab.audible,
+                isSpecialUrl: isSpecialUrl,
+                protocol: new URL(tab.url).protocol,
+                hasPermission: grantedTabs.has(tab.id)
+            });
+            
+            if (isSpecialUrl) {
+                console.warn('[Service Worker] WARNING: Attempting to capture audio from special URL:', tab.url);
+            }
             
             // Get media stream ID for tab capture
+            console.log('[Service Worker] CONTEXT CHECK - Running in:', {
+                context: 'service-worker',
+                globalThis: typeof globalThis,
+                self: typeof self,
+                hasNavigator: typeof navigator !== 'undefined',
+                hasMediaDevices: typeof navigator !== 'undefined' && navigator.mediaDevices !== undefined,
+                timestamp: Date.now()
+            });
+            
             return new Promise((resolve, reject) => {
+                const captureStartTime = Date.now();
+                
                 chrome.tabCapture.getMediaStreamId({
                     targetTabId: tab.id
                 }, (streamId) => {
                     if (chrome.runtime.lastError) {
-                        reject(new Error(chrome.runtime.lastError.message));
+                        // Log the error message directly first
+                        const errorMessage = chrome.runtime.lastError.message || String(chrome.runtime.lastError) || 'Unknown error';
+                        console.error('[Service Worker] TAB CAPTURE ERROR MESSAGE:', errorMessage);
+                        
+                        // Then log full details
+                        console.error('[Service Worker] TAB CAPTURE ERROR DETAILS:', {
+                            message: errorMessage,
+                            rawError: chrome.runtime.lastError,
+                            errorString: String(chrome.runtime.lastError),
+                            errorJSON: JSON.stringify(chrome.runtime.lastError),
+                            targetTabId: tab.id,
+                            tabUrl: tab.url,
+                            tabTitle: tab.title,
+                            tabAudible: tab.audible
+                        });
+                        reject(new Error(errorMessage));
                         return;
                     }
                     
                     this.tabStreamId = streamId;
-                    console.log('[Service Worker] Tab audio capture stream ID:', streamId);
+                    const captureEndTime = Date.now();
+                    
+                    console.log('[Service Worker] TAB AUDIO CAPTURE SUCCESS - Stream ID Details:', {
+                        streamId: streamId,
+                        streamIdLength: streamId.length,
+                        streamIdType: typeof streamId,
+                        generationTime: captureEndTime - captureStartTime,
+                        timestamp: captureEndTime,
+                        context: 'service-worker',
+                        tabId: tab.id,
+                        tabUrl: tab.url
+                    });
+                    
                     this.sendLogToContent('INFO', 'TabCapture', 'Tab audio stream ID obtained');
                     resolve(streamId);
                 });
@@ -193,13 +295,19 @@ class TranscriptionService {
         
         if (socket?.readyState === WebSocket.OPEN) {
             socket.send(audioData);
-            console.log(`[Service Worker] Sent audio chunk to ${source} socket:`, audioData.byteLength, 'bytes');
+            if (source === 'others') {
+                console.log(`[Service Worker] TAB audio sent to Deepgram:`, audioData.byteLength, 'bytes');
+            } else {
+                console.log(`[Service Worker] Sent audio chunk to ${source} socket:`, audioData.byteLength, 'bytes');
+            }
         } else {
             console.warn(`[Service Worker] Socket not ready for ${source}`, {
                 socketExists: !!socket,
                 readyState: socket?.readyState,
+                readyStateText: socket ? ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][socket.readyState] : 'NO_SOCKET',
                 micSocketOpen: this.micSocket?.readyState === WebSocket.OPEN,
-                tabSocketOpen: this.tabSocket?.readyState === WebSocket.OPEN
+                tabSocketOpen: this.tabSocket?.readyState === WebSocket.OPEN,
+                isTabSource: source === 'others'
             });
         }
     }
@@ -210,13 +318,28 @@ class TranscriptionService {
             return;
         }
         
+        const mappedSource = source === 'user' ? 'user' : 'others';
+        
+        if (source === 'others') {
+            console.log(`[Service Worker] Sending TAB transcription to content script:`, {
+                activeTabId: this.activeTabId,
+                source: mappedSource,
+                text: text.substring(0, 50) + '...',
+                isFinal: isFinal
+            });
+        }
+        
         chrome.tabs.sendMessage(this.activeTabId, {
             type: 'TRANSCRIPTION_UPDATE',
-            source: source === 'user' ? 'user' : 'others',
+            source: mappedSource,
             text,
             isFinal
+        }).then(() => {
+            if (source === 'others') {
+                console.log(`[Service Worker] TAB transcription sent successfully`);
+            }
         }).catch(err => {
-            console.warn('[Service Worker] Failed to send transcription update:', err);
+            console.warn(`[Service Worker] Failed to send ${source} transcription update:`, err);
         });
     }
 
@@ -262,6 +385,13 @@ class TranscriptionService {
         switch (request.type) {
             case 'REQUEST_TAB_AUDIO':
                 try {
+                    console.log('[Service Worker] REQUEST_TAB_AUDIO received from:', {
+                        senderTabId: sender.tab?.id,
+                        senderUrl: sender.tab?.url,
+                        senderFrameId: sender.frameId,
+                        currentActiveTabId: this.activeTabId
+                    });
+                    
                     // Store the tab ID if not already set
                     if (!this.activeTabId && sender.tab && sender.tab.id) {
                         this.activeTabId = sender.tab.id;
@@ -270,14 +400,45 @@ class TranscriptionService {
                     
                     const streamId = await this.handleTabAudioCapture();
                     
+                    console.log('[Service Worker] Got stream ID, creating offscreen document');
+                    
+                    // Create offscreen document to handle tab audio capture
+                    try {
+                        await chrome.offscreen.createDocument({
+                            url: 'offscreen.html',
+                            reasons: ['USER_MEDIA'],
+                            justification: 'Capture tab audio using streamId in offscreen document'
+                        });
+                        console.log('[Service Worker] Offscreen document created');
+                    } catch (error) {
+                        // Document might already exist
+                        if (!error.message.includes('already exists')) {
+                            throw error;
+                        }
+                        console.log('[Service Worker] Offscreen document already exists');
+                    }
+                    
                     // Connect to Deepgram for tab audio
                     if (!this.tabSocket || this.tabSocket.readyState !== WebSocket.OPEN) {
                         this.tabSocket = await this.connectToDeepgram('others');
                     }
                     
-                    sendResponse({ success: true, streamId });
+                    // Send streamId to offscreen document
+                    const offscreenResponse = await chrome.runtime.sendMessage({
+                        type: 'START_TAB_CAPTURE',
+                        streamId: streamId
+                    });
+                    
+                    if (offscreenResponse.success) {
+                        console.log('[Service Worker] Tab capture started in offscreen document');
+                        sendResponse({ success: true, message: 'Tab audio capture started' });
+                    } else {
+                        throw new Error(offscreenResponse.error || 'Failed to start tab capture');
+                    }
                 } catch (error) {
-                    sendResponse({ success: false, error: error.message });
+                    const errorMsg = error.message || String(error) || 'Unknown error';
+                    console.error('[Service Worker] REQUEST_TAB_AUDIO failed:', errorMsg);
+                    sendResponse({ success: false, error: errorMsg });
                 }
                 break;
                 
@@ -291,12 +452,7 @@ class TranscriptionService {
                         console.log('[Service Worker] Active tab ID set:', this.activeTabId);
                     }
                     
-                    // Reload API key if not available
-                    if (!this.apiKey) {
-                        const result = await chrome.storage.local.get(['deepgramApiKey']);
-                        this.apiKey = result.deepgramApiKey;
-                        console.log('[Service Worker] Reloaded API key:', !!this.apiKey);
-                    }
+                    // API key is now hardcoded, no need to reload
                     
                     // Connect to Deepgram for mic audio
                     if (!this.micSocket || this.micSocket.readyState !== WebSocket.OPEN) {
@@ -318,6 +474,15 @@ class TranscriptionService {
                     break;
                 }
                 
+                if (request.source === 'others') {
+                    console.log('[Service Worker] TAB AUDIO_DATA received:', {
+                        source: request.source,
+                        byteLength: request.byteLength,
+                        hasData: !!request.data,
+                        dataLength: request.data?.length
+                    });
+                }
+                
                 try {
                     // Decode base64 data back to ArrayBuffer
                     const binaryString = atob(request.data);
@@ -330,13 +495,52 @@ class TranscriptionService {
                     this.sendAudioToDeepgram(bytes.buffer, request.source);
                     sendResponse({ success: true });
                 } catch (error) {
-                    console.error('[Service Worker] Error decoding audio data:', error);
+                    console.error(`[Service Worker] Error decoding ${request.source} audio data:`, error);
+                    sendResponse({ success: false, error: error.message });
+                }
+                break;
+                
+            case 'TAB_AUDIO_DATA':
+                // Handle audio data from offscreen document
+                if (!request.data) {
+                    console.error('[Service Worker] No audio data in TAB_AUDIO_DATA message');
+                    sendResponse({ success: false, error: 'No audio data' });
+                    break;
+                }
+                
+                console.log('[Service Worker] TAB AUDIO_DATA received from offscreen:', {
+                    byteLength: request.byteLength,
+                    sampleCount: request.sampleCount,
+                    timestamp: request.timestamp
+                });
+                
+                try {
+                    // Decode base64 data back to ArrayBuffer
+                    const binaryString = atob(request.data);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+                    
+                    // Send to Deepgram
+                    this.sendAudioToDeepgram(bytes.buffer, 'others');
+                    sendResponse({ success: true });
+                } catch (error) {
+                    console.error('[Service Worker] Failed to process tab audio data:', error);
                     sendResponse({ success: false, error: error.message });
                 }
                 break;
                 
             case 'STOP_TRANSCRIPTION':
                 this.stopTranscription();
+                // Close offscreen document if it exists
+                try {
+                    await chrome.offscreen.closeDocument();
+                    console.log('[Service Worker] Offscreen document closed');
+                } catch (error) {
+                    // Document might not exist
+                    console.log('[Service Worker] No offscreen document to close');
+                }
                 sendResponse({ success: true });
                 break;
                 
@@ -437,10 +641,60 @@ class TranscriptionService {
 // Initialize service
 const transcriptionService = new TranscriptionService();
 
+// Track which tabs have been granted permission via user interaction
+const grantedTabs = new Set();
+
 // Message listener
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     transcriptionService.handleMessage(request, sender, sendResponse);
     return true; // Keep message channel open
+});
+
+// Handle extension icon clicks to grant activeTab permission
+chrome.action.onClicked.addListener(async (tab) => {
+    console.log('[Service Worker] Extension icon clicked for tab:', tab.id, tab.url);
+    
+    // Add this tab to granted permissions
+    grantedTabs.add(tab.id);
+    console.log('[Service Worker] Tab permission granted for:', tab.id);
+    
+    // Persist to storage
+    try {
+        await chrome.storage.session.set({ 
+            grantedTabs: Array.from(grantedTabs) 
+        });
+        console.log('[Service Worker] Persisted granted tabs to storage');
+    } catch (error) {
+        console.log('[Service Worker] Could not persist granted tabs:', error);
+    }
+    
+    // Notify the tab that permission has been granted
+    // Content scripts are already injected by manifest
+    chrome.tabs.sendMessage(tab.id, {
+        type: 'PERMISSION_GRANTED',
+        tabId: tab.id
+    }).then(() => {
+        console.log('[Service Worker] Permission grant notification sent successfully');
+    }).catch(err => {
+        console.log('[Service Worker] Could not notify tab of permission grant:', err);
+    });
+});
+
+// Clean up granted tabs when they're closed
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+    if (grantedTabs.has(tabId)) {
+        grantedTabs.delete(tabId);
+        console.log('[Service Worker] Removed permission grant for closed tab:', tabId);
+        
+        // Update storage
+        try {
+            await chrome.storage.session.set({ 
+                grantedTabs: Array.from(grantedTabs) 
+            });
+        } catch (error) {
+            console.log('[Service Worker] Could not update granted tabs storage:', error);
+        }
+    }
 });
 
 // Alarm listener for keepalive backup

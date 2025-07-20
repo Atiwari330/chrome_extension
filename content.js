@@ -467,6 +467,10 @@ class MeetTranscriptionExtension {
                 -webkit-backdrop-filter: blur(10px);
                 transition: all 0.3s ease;
             }
+            
+            .transcription-pane.unified {
+                width: 100%;
+            }
 
             .transcription-pane:hover {
                 background: rgba(255, 255, 255, 0.08);
@@ -546,12 +550,12 @@ class MeetTranscriptionExtension {
 
             .transcription-entry {
                 margin-bottom: 12px;
-                padding: 8px 12px;
+                padding: 10px 16px;
                 background: rgba(255, 255, 255, 0.03);
                 border-radius: 8px;
-                border-left: 3px solid var(--primary-color);
                 transition: all 0.2s ease;
                 animation: slideIn 0.3s ease-out;
+                line-height: 1.5;
             }
 
             .transcription-entry:hover {
@@ -561,20 +565,35 @@ class MeetTranscriptionExtension {
 
             .transcription-entry.interim {
                 opacity: 0.7;
-                border-left-color: var(--warning-color);
-                background: rgba(250, 166, 26, 0.1);
+                background: rgba(255, 255, 255, 0.02);
+                border: 1px dashed rgba(255, 255, 255, 0.2);
             }
 
             .timestamp {
-                display: block;
+                display: inline-block;
                 font-size: 11px;
                 color: var(--text-muted);
-                margin-bottom: 4px;
+                margin-right: 8px;
                 font-weight: 500;
+            }
+            
+            .speaker {
+                display: inline-block;
+                font-weight: 600;
+                margin-right: 8px;
+                font-size: 13px;
+            }
+            
+            .speaker-provider {
+                color: #5865F2; /* Blue for Provider */
+            }
+            
+            .speaker-client {
+                color: #3BA55C; /* Green for Client */
             }
 
             .transcription-text {
-                display: block;
+                display: inline;
                 color: var(--text-primary);
                 word-wrap: break-word;
             }
@@ -598,11 +617,6 @@ class MeetTranscriptionExtension {
                 opacity: 0.6;
             }
 
-            .divider {
-                width: 1px;
-                background: var(--border-color);
-                margin: 0 8px;
-            }
 
             /* Log Section */
             .log-section {
@@ -931,6 +945,62 @@ class MeetTranscriptionExtension {
                     });
                     break;
                     
+                case 'PERMISSION_GRANTED':
+                    this.logger.info('Content', 'Tab permission granted, can now capture tab audio');
+                    
+                    // Show a notification to the user
+                    const notificationDiv = document.createElement('div');
+                    notificationDiv.style.cssText = `
+                        position: fixed;
+                        top: 20px;
+                        right: 20px;
+                        background: #4caf50;
+                        color: white;
+                        padding: 16px 24px;
+                        border-radius: 8px;
+                        z-index: 2147483647;
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+                        font-size: 14px;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                    `;
+                    notificationDiv.textContent = 'Tab audio permission granted!';
+                    document.body.appendChild(notificationDiv);
+                    
+                    // If we're currently transcribing, retry tab audio capture
+                    if (this.isTranscribing && this.audioProcessor && !this.audioProcessor.tabStream) {
+                        this.logger.info('Content', 'Retrying tab audio capture after permission grant');
+                        notificationDiv.textContent += ' Enabling audio from others...';
+                        
+                        // Request tab audio again
+                        chrome.runtime.sendMessage({
+                            type: 'REQUEST_TAB_AUDIO'
+                        }).then(async (response) => {
+                            if (response && response.streamId) {
+                                this.logger.info('Content', 'Tab audio retry successful', { streamId: response.streamId });
+                                
+                                try {
+                                    // Start tab audio processing
+                                    await this.audioProcessor.startTabAudioProcessing(response.streamId);
+                                    notificationDiv.textContent = 'Tab audio permission granted! Now recording audio from others.';
+                                    notificationDiv.style.background = '#2196f3';
+                                } catch (error) {
+                                    this.logger.error('Content', 'Failed to start tab audio after retry', error);
+                                }
+                            } else {
+                                this.logger.error('Content', 'Tab audio retry failed', response);
+                            }
+                        });
+                    }
+                    
+                    setTimeout(() => {
+                        if (notificationDiv.parentNode) {
+                            notificationDiv.parentNode.removeChild(notificationDiv);
+                        }
+                    }, 4000);
+                    
+                    sendResponse({ success: true });
+                    break;
+                    
                 default:
                     sendResponse({ error: 'Unknown message type' });
             }
@@ -965,9 +1035,55 @@ class MeetTranscriptionExtension {
                 type: 'REQUEST_TAB_AUDIO'
             });
             
-            if (response.streamId) {
-                this.logger.info('Content', 'Tab audio stream ID received', { streamId: response.streamId });
-                // Tab audio will be handled by service worker
+            this.logger.info('Content', 'Tab audio request response:', {
+                success: response?.success,
+                hasStreamId: !!response?.streamId,
+                error: response?.error,
+                fullResponse: JSON.stringify(response)
+            });
+            
+            if (response.success) {
+                console.log('[Content] Tab audio capture response:', {
+                    success: response.success,
+                    message: response.message,
+                    receiveTime: Date.now(),
+                    context: 'content-script'
+                });
+                
+                this.logger.info('Content', 'Tab audio capture started in service worker');
+                // Tab audio is now being processed entirely in the service worker
+            } else if (response.error) {
+                this.logger.error('Content', 'Tab audio capture failed', { error: response.error });
+                
+                // Show error to user if it's a permission issue
+                if (response.error.includes('permission not granted') || response.error.includes('not been invoked')) {
+                    const errorDiv = document.createElement('div');
+                    errorDiv.style.cssText = `
+                        position: fixed;
+                        bottom: 20px;
+                        right: 20px;
+                        background: #ff9800;
+                        color: white;
+                        padding: 16px 24px;
+                        border-radius: 8px;
+                        z-index: 2147483647;
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+                        font-size: 14px;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                        max-width: 400px;
+                    `;
+                    errorDiv.innerHTML = `
+                        <strong>Tab Audio Permission Required</strong><br>
+                        <span style="font-size: 13px;">Click the extension icon in the toolbar to grant permission for capturing audio from others in this meeting.</span>
+                    `;
+                    document.body.appendChild(errorDiv);
+                    
+                    setTimeout(() => {
+                        if (errorDiv.parentNode) {
+                            errorDiv.parentNode.removeChild(errorDiv);
+                        }
+                    }, 6000);
+                }
             }
             
             // Update UI
@@ -1005,9 +1121,22 @@ class MeetTranscriptionExtension {
                 type: 'REQUEST_TAB_AUDIO'
             });
             
-            if (response.streamId) {
-                // Start tab audio processing
-                await this.audioProcessor.startTabAudioProcessing(response.streamId);
+            this.logger.info('Content', 'AudioProcessor tab audio request response:', {
+                success: response?.success,
+                hasStreamId: !!response?.streamId,
+                streamId: response?.streamId,
+                error: response?.error
+            });
+            
+            if (response.success) {
+                console.log('[Content] Tab audio is being processed in service worker');
+                this.logger.info('Content', 'Tab audio processing delegated to service worker');
+                // Tab audio is now handled entirely in the service worker
+                // No need to process it in the content script
+            } else {
+                this.logger.error('Content', 'Cannot start tab audio processing', {
+                    error: response.error
+                });
             }
             
             this.logger.info('Content', 'Audio processing started successfully');

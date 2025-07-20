@@ -13,6 +13,7 @@ class FloatingUI {
             user: [],
             others: []
         };
+        this.hasTabPermission = false;
         
         this.logger.info('FloatingUI', 'Initializing floating UI');
         
@@ -70,6 +71,20 @@ class FloatingUI {
                 
                 <div class="widget-body">
                     <div class="controls-section">
+                        ${!this.hasTabPermission ? `
+                            <div id="permission-notice" style="
+                                background: rgba(255, 152, 0, 0.1);
+                                border: 1px solid rgba(255, 152, 0, 0.3);
+                                border-radius: 8px;
+                                padding: 10px;
+                                margin-bottom: 12px;
+                                font-size: 13px;
+                                color: #ff9800;
+                                text-align: center;
+                            ">
+                                ⚠️ Click extension icon to enable audio from others
+                            </div>
+                        ` : ''}
                         <button id="start-stop-btn" class="primary-btn">
                             Start Recording
                         </button>
@@ -90,31 +105,17 @@ class FloatingUI {
                     </div>
                     
                     <div class="transcription-section">
-                        <div class="transcription-pane">
+                        <div class="transcription-pane unified">
                             <div class="pane-header">
-                                <h3>You</h3>
-                                <button class="clear-btn" data-target="user-transcription" title="Clear">
+                                <h3>Transcript</h3>
+                                <button class="clear-btn" data-target="unified-transcription" title="Clear">
                                     <svg width="14" height="14" viewBox="0 0 14 14">
                                         <path d="M14 1.41L12.59 0L7 5.59L1.41 0L0 1.41L5.59 7L0 12.59L1.41 14L7 8.41L12.59 14L14 12.59L8.41 7L14 1.41Z" fill="currentColor"/>
                                     </svg>
                                 </button>
                             </div>
-                            <div class="transcription-content" id="user-transcription">
-                                <p class="placeholder">Your speech will appear here...</p>
-                            </div>
-                        </div>
-                        <div class="divider"></div>
-                        <div class="transcription-pane">
-                            <div class="pane-header">
-                                <h3>Others</h3>
-                                <button class="clear-btn" data-target="others-transcription" title="Clear">
-                                    <svg width="14" height="14" viewBox="0 0 14 14">
-                                        <path d="M14 1.41L12.59 0L7 5.59L1.41 0L0 1.41L5.59 7L0 12.59L1.41 14L7 8.41L12.59 14L14 12.59L8.41 7L14 1.41Z" fill="currentColor"/>
-                                    </svg>
-                                </button>
-                            </div>
-                            <div class="transcription-content" id="others-transcription">
-                                <p class="placeholder">Others' speech will appear here...</p>
+                            <div class="transcription-content" id="unified-transcription">
+                                <p class="placeholder">Transcription will appear here...</p>
                             </div>
                         </div>
                     </div>
@@ -269,7 +270,7 @@ class FloatingUI {
     clearTranscription(targetId) {
         const element = this.shadowRoot.getElementById(targetId);
         if (element) {
-            element.innerHTML = '<p class="placeholder">Cleared. New transcriptions will appear here...</p>';
+            element.innerHTML = '<p class="placeholder">Transcription will appear here...</p>';
             this.logger.info('FloatingUI', `Cleared transcriptions for ${targetId}`);
         }
     }
@@ -278,11 +279,21 @@ class FloatingUI {
         // Listen for transcription updates from service worker
         chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (request.type === 'TRANSCRIPTION_UPDATE') {
+                if (request.source === 'others') {
+                    this.logger.info('FloatingUI', 'Received OTHERS transcription message', {
+                        source: request.source,
+                        text: request.text.substring(0, 50) + '...',
+                        isFinal: request.isFinal
+                    });
+                }
                 this.updateTranscription(request.source, request.text, request.isFinal);
             } else if (request.type === 'AUDIO_LEVEL_UPDATE') {
                 this.updateAudioLevel(request.source, request.level);
             } else if (request.type === 'CONNECTION_STATUS') {
                 this.updateConnectionStatus(request.status, request.message);
+            } else if (request.type === 'PERMISSION_GRANTED') {
+                this.logger.info('FloatingUI', 'Tab permission granted notification received');
+                this.setTabPermission(true);
             }
         });
         
@@ -431,29 +442,7 @@ class FloatingUI {
             btn.classList.remove('recording');
             this.shadowRoot.querySelector('.status-indicator').classList.remove('active');
         } else {
-            // Check for API key first
-            const { deepgramApiKey } = await chrome.storage.local.get(['deepgramApiKey']);
-            if (!deepgramApiKey) {
-                // Show inline error instead of alert
-                const errorDiv = document.createElement('div');
-                errorDiv.style.cssText = `
-                    position: absolute;
-                    top: 60px;
-                    left: 10px;
-                    right: 10px;
-                    background: #f44336;
-                    color: white;
-                    padding: 10px;
-                    border-radius: 4px;
-                    font-size: 12px;
-                    z-index: 1000;
-                `;
-                errorDiv.textContent = 'API key required! Click Settings to add it.';
-                this.widget.appendChild(errorDiv);
-                
-                setTimeout(() => errorDiv.remove(), 3000);
-                return;
-            }
+            // API key is now hardcoded in service worker, no need to check
             
             // Start recording
             this.contentScript.startTranscription();
@@ -479,11 +468,10 @@ class FloatingUI {
     updateTranscription(source, text, isFinal) {
         this.logger.info('FloatingUI', 'Updating transcription', { source, text, isFinal });
         
-        const elementId = source === 'user' ? 'user-transcription' : 'others-transcription';
-        const element = this.shadowRoot.getElementById(elementId);
+        const element = this.shadowRoot.getElementById('unified-transcription');
         
         if (!element) {
-            this.logger.error('FloatingUI', 'Transcription element not found', { elementId });
+            this.logger.error('FloatingUI', 'Transcription element not found');
             return;
         }
         
@@ -493,66 +481,97 @@ class FloatingUI {
             placeholder.remove();
         }
         
+        // Determine speaker label
+        const speakerLabel = source === 'user' ? 'Provider' : 'Client';
+        const speakerClass = source === 'user' ? 'speaker-provider' : 'speaker-client';
+        
         if (isFinal) {
-            // Remove any interim transcription
-            const interim = element.querySelector('.interim');
+            // Remove any interim transcription for this source
+            const interim = element.querySelector(`.interim[data-source="${source}"]`);
             if (interim) {
                 interim.remove();
             }
             
-            // Add final transcription with timestamp
+            // Add final transcription with timestamp and speaker
             const transcriptionDiv = document.createElement('div');
             transcriptionDiv.className = 'transcription-entry';
+            transcriptionDiv.setAttribute('data-source', source);
             
             const timestamp = document.createElement('span');
             timestamp.className = 'timestamp';
-            timestamp.textContent = new Date().toLocaleTimeString('en-US', { 
+            timestamp.textContent = `[${new Date().toLocaleTimeString('en-US', { 
                 hour: '2-digit', 
                 minute: '2-digit',
                 second: '2-digit'
-            });
+            })}]`;
+            
+            const speaker = document.createElement('span');
+            speaker.className = `speaker ${speakerClass}`;
+            speaker.textContent = `${speakerLabel}:`;
             
             const textSpan = document.createElement('span');
             textSpan.className = 'transcription-text';
             textSpan.textContent = text;
             
             transcriptionDiv.appendChild(timestamp);
+            transcriptionDiv.appendChild(speaker);
             transcriptionDiv.appendChild(textSpan);
             element.appendChild(transcriptionDiv);
             
             // Auto-scroll to bottom
             element.scrollTop = element.scrollHeight;
             
-            this.logger.info('FloatingUI', 'Added final transcription', { source, text });
+            this.logger.info('FloatingUI', 'Added final transcription', { source, speaker: speakerLabel, text });
         } else {
             // Update or create interim transcription
-            let interim = element.querySelector('.interim');
+            let interim = element.querySelector(`.interim[data-source="${source}"]`);
             if (!interim) {
-                // Remove any existing interim first
-                const existingInterim = element.querySelector('.interim');
-                if (existingInterim) {
-                    existingInterim.remove();
-                }
-                
                 interim = document.createElement('div');
                 interim.className = 'transcription-entry interim';
+                interim.setAttribute('data-source', source);
+                
+                const timestamp = document.createElement('span');
+                timestamp.className = 'timestamp';
+                timestamp.textContent = `[${new Date().toLocaleTimeString('en-US', { 
+                    hour: '2-digit', 
+                    minute: '2-digit',
+                    second: '2-digit'
+                })}]`;
+                
+                const speaker = document.createElement('span');
+                speaker.className = `speaker ${speakerClass}`;
+                speaker.textContent = `${speakerLabel}:`;
                 
                 const textSpan = document.createElement('span');
                 textSpan.className = 'transcription-text';
+                
+                interim.appendChild(timestamp);
+                interim.appendChild(speaker);
                 interim.appendChild(textSpan);
                 
                 element.appendChild(interim);
             }
             
+            // Update the text content
             const textSpan = interim.querySelector('.transcription-text');
             if (textSpan) {
                 textSpan.textContent = text;
             }
             
+            // Update timestamp for interim
+            const timestampSpan = interim.querySelector('.timestamp');
+            if (timestampSpan) {
+                timestampSpan.textContent = `[${new Date().toLocaleTimeString('en-US', { 
+                    hour: '2-digit', 
+                    minute: '2-digit',
+                    second: '2-digit'
+                })}]`;
+            }
+            
             // Auto-scroll to bottom
             element.scrollTop = element.scrollHeight;
             
-            this.logger.debug('FloatingUI', 'Updated interim transcription', { source, text });
+            this.logger.debug('FloatingUI', 'Updated interim transcription', { source, speaker: speakerLabel, text });
         }
     }
 
@@ -637,5 +656,22 @@ class FloatingUI {
         setTimeout(() => URL.revokeObjectURL(url), 100);
         
         this.logger.info('FloatingUI', 'Logs exported', { filename });
+    }
+    
+    setTabPermission(hasPermission) {
+        this.hasTabPermission = hasPermission;
+        const permissionNotice = this.shadowRoot.getElementById('permission-notice');
+        
+        if (permissionNotice) {
+            if (hasPermission) {
+                // Hide the notice
+                permissionNotice.style.display = 'none';
+            } else {
+                // Show the notice
+                permissionNotice.style.display = 'block';
+            }
+        }
+        
+        this.logger.info('FloatingUI', 'Tab permission status updated', { hasPermission });
     }
 }

@@ -10,7 +10,8 @@
     "scripting",
     "activeTab",
     "tabCapture",
-    "alarms"
+    "alarms",
+    "offscreen"
   ],
   
   "host_permissions": [
@@ -38,15 +39,15 @@
         "styles.css",
         "audio-worklet-processor.js",
         "audio-processor.js",
-        "logger.js"
+        "logger.js",
+        "offscreen.html",
+        "offscreen.js"
       ],
       "matches": ["https://meet.google.com/*"]
     }
   ],
   
-  "action": {
-    "default_popup": "popup.html"
-  },
+  "action": {},
   
   "options_page": "options.html"
 }

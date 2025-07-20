@@ -61,8 +61,43 @@ class AudioProcessor {
     }
     
     async startTabAudioProcessing(streamId) {
+        const processingStartTime = Date.now();
+        
         try {
+            
+            this.logger.info('AudioProcessor', 'Starting tab audio processing with streamId:', streamId);
+            
+            // Context and capability check
+            console.log('[AudioProcessor] CONTEXT CHECK - Running in:', {
+                context: 'content-script',
+                location: window.location.href,
+                hasNavigator: typeof navigator !== 'undefined',
+                hasMediaDevices: typeof navigator?.mediaDevices !== 'undefined',
+                hasGetUserMedia: typeof navigator?.mediaDevices?.getUserMedia === 'function',
+                streamId: streamId,
+                streamIdLength: streamId?.length,
+                streamIdType: typeof streamId,
+                timeSincePageLoad: Date.now() - performance.timing.navigationStart,
+                timestamp: processingStartTime
+            });
+            
+            // Check if we can access chrome APIs
+            console.log('[AudioProcessor] Chrome API availability:', {
+                hasChromeRuntime: typeof chrome?.runtime !== 'undefined',
+                hasTabCapture: typeof chrome?.tabCapture !== 'undefined',
+                chromeMediaSourceSupported: navigator?.mediaDevices?.getSupportedConstraints?.()?.chromeMediaSource
+            });
+            
             // Get the MediaStream from tab capture
+            console.log('[AudioProcessor] About to call getUserMedia with constraints:', {
+                audio: {
+                    mandatory: {
+                        chromeMediaSource: 'tab',
+                        chromeMediaSourceId: streamId
+                    }
+                }
+            });
+            
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     mandatory: {
@@ -74,15 +109,39 @@ class AudioProcessor {
             
             this.tabStream = stream;
             
+            // Log stream details
+            const audioTracks = stream.getAudioTracks();
+            this.logger.info('AudioProcessor', 'Tab stream obtained', {
+                streamId: stream.id,
+                active: stream.active,
+                audioTracks: audioTracks.length,
+                trackDetails: audioTracks.map(track => ({
+                    label: track.label,
+                    enabled: track.enabled,
+                    muted: track.muted,
+                    readyState: track.readyState
+                }))
+            });
+            
+            // Check AudioContext state
+            this.logger.info('AudioProcessor', 'AudioContext state before tab source:', this.audioContext.state);
+            
             // Create audio source from tab stream
             const source = this.audioContext.createMediaStreamSource(stream);
             
             // Create AudioWorkletNode for PCM processing
             this.tabWorklet = new AudioWorkletNode(this.audioContext, 'pcm-processor');
             
+            // Log when tab worklet is created
+            this.logger.info('AudioProcessor', 'Tab AudioWorkletNode created');
+            
             // Handle PCM data from worklet
             this.tabWorklet.port.onmessage = (event) => {
                 if (event.data.type === 'pcm') {
+                    this.logger.debug('AudioProcessor', 'Tab PCM data received in worklet message', {
+                        byteLength: event.data.data?.byteLength,
+                        sampleCount: event.data.sampleCount
+                    });
                     this.handlePCMData('others', event.data);
                 }
             };
@@ -90,12 +149,44 @@ class AudioProcessor {
             // Connect audio graph
             source.connect(this.tabWorklet);
             
+            this.logger.info('AudioProcessor', 'Tab audio graph connected: source -> worklet');
+            
             // Calculate and display audio levels
             this.setupAudioLevelMonitoring(source, 'others');
             
-            this.logger.info('AudioProcessor', 'Tab audio processing started');
+            this.logger.info('AudioProcessor', 'Tab audio processing started successfully');
         } catch (error) {
-            this.logger.error('AudioProcessor', 'Failed to start tab audio processing', error);
+            const processingEndTime = Date.now();
+            
+            console.error('[AudioProcessor] TAB CAPTURE FAILED - Detailed error analysis:', {
+                errorName: error.name,
+                errorMessage: error.message,
+                errorCode: error.code,
+                errorConstraint: error.constraint,
+                fullError: error,
+                errorString: String(error),
+                streamIdUsed: streamId,
+                timingInfo: {
+                    processingStartTime,
+                    processingEndTime,
+                    duration: processingEndTime - processingStartTime
+                },
+                context: 'content-script'
+            });
+            
+            // Additional diagnostic info
+            if (error.name === 'AbortError') {
+                console.error('[AudioProcessor] AbortError specific diagnostics:', {
+                    possibleCause: 'Cross-context streamId usage or expired streamId',
+                    suggestion: 'StreamId must be used in same context where generated'
+                });
+            }
+            
+            this.logger.error('AudioProcessor', 'Failed to start tab audio processing', {
+                error: error.message,
+                stack: error.stack,
+                streamId: streamId
+            });
             throw error;
         }
     }
@@ -139,12 +230,21 @@ class AudioProcessor {
     }
     
     handlePCMData(source, data) {
-        // Log PCM data reception
-        this.logger.debug('AudioProcessor', `PCM data received from ${source}`, {
-            byteLength: data.data.byteLength,
-            sampleCount: data.sampleCount,
-            timestamp: data.timestamp
-        });
+        // Log PCM data reception with more detail for tab audio
+        if (source === 'others') {
+            this.logger.info('AudioProcessor', `TAB PCM data received from ${source}`, {
+                byteLength: data.data.byteLength,
+                sampleCount: data.sampleCount,
+                timestamp: data.timestamp,
+                hasData: data.data.byteLength > 0
+            });
+        } else {
+            this.logger.debug('AudioProcessor', `PCM data received from ${source}`, {
+                byteLength: data.data.byteLength,
+                sampleCount: data.sampleCount,
+                timestamp: data.timestamp
+            });
+        }
         
         // Convert ArrayBuffer to base64 for message passing
         const base64Data = this.arrayBufferToBase64(data.data);
@@ -156,9 +256,13 @@ class AudioProcessor {
             data: base64Data,
             byteLength: data.data.byteLength
         }).then(() => {
-            this.logger.debug('AudioProcessor', 'Audio data sent to service worker');
+            if (source === 'others') {
+                this.logger.info('AudioProcessor', 'TAB audio data sent to service worker successfully');
+            } else {
+                this.logger.debug('AudioProcessor', 'Audio data sent to service worker');
+            }
         }).catch(error => {
-            this.logger.error('AudioProcessor', 'Failed to send audio data', error);
+            this.logger.error('AudioProcessor', `Failed to send ${source} audio data`, error);
         });
     }
     
