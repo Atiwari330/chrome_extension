@@ -531,6 +531,72 @@ class TranscriptionService {
                 }
                 break;
                 
+            case 'CAPTURE_ERROR':
+            case 'PLAYBACK_ERROR':
+                // Handle errors from offscreen document
+                console.error(`[Service Worker] ${request.type}:`, request.error, request.code);
+                this.sendLogToContent('ERROR', 'Offscreen', request.error, {
+                    code: request.code,
+                    type: request.type
+                });
+                
+                // Notify UI about the error
+                if (this.activeTabId) {
+                    chrome.tabs.sendMessage(this.activeTabId, {
+                        type: 'AUDIO_ERROR',
+                        source: 'tab',
+                        error: request.error,
+                        code: request.code
+                    }).catch(err => {
+                        console.log('[Service Worker] Failed to send error to UI:', err);
+                    });
+                }
+                sendResponse({ success: true });
+                break;
+                
+            case 'TRACK_ENDED':
+                // Handle track end event from offscreen document
+                console.warn('[Service Worker] Tab audio track ended:', request.message);
+                this.sendLogToContent('WARN', 'Offscreen', request.message);
+                
+                // Attempt to restart tab capture
+                if (this.isTranscribing && this.tabStreamId) {
+                    console.log('[Service Worker] Attempting to restart tab capture...');
+                    setTimeout(() => {
+                        this.handleTabAudioCapture().then(streamId => {
+                            // Send new streamId to offscreen document
+                            chrome.runtime.sendMessage({
+                                type: 'START_TAB_CAPTURE',
+                                streamId: streamId
+                            });
+                        }).catch(err => {
+                            console.error('[Service Worker] Failed to restart tab capture:', err);
+                        });
+                    }, 1000);
+                }
+                sendResponse({ success: true });
+                break;
+                
+            case 'FALLBACK_MODE':
+                // Handle fallback mode notification
+                console.log('[Service Worker] Fallback mode:', request);
+                this.sendLogToContent('INFO', 'Offscreen', request.message, {
+                    transcriptionEnabled: request.transcriptionEnabled
+                });
+                
+                // Notify UI about fallback mode
+                if (this.activeTabId) {
+                    chrome.tabs.sendMessage(this.activeTabId, {
+                        type: 'FALLBACK_MODE',
+                        transcriptionEnabled: request.transcriptionEnabled,
+                        message: request.message
+                    }).catch(err => {
+                        console.log('[Service Worker] Failed to send fallback mode to UI:', err);
+                    });
+                }
+                sendResponse({ success: true });
+                break;
+                
             case 'STOP_TRANSCRIPTION':
                 this.stopTranscription();
                 // Close offscreen document if it exists

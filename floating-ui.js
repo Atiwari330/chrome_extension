@@ -294,6 +294,16 @@ class FloatingUI {
             } else if (request.type === 'PERMISSION_GRANTED') {
                 this.logger.info('FloatingUI', 'Tab permission granted notification received');
                 this.setTabPermission(true);
+            } else if (request.type === 'AUDIO_ERROR') {
+                this.logger.error('FloatingUI', `Audio error for ${request.source}:`, request.error);
+                this.updateConnectionStatus('error', `${request.source === 'tab' ? 'Tab' : 'Mic'} audio error: ${request.error}`);
+                // Add error indication to UI
+                if (request.source === 'tab') {
+                    this.setTabPermission(false, request.error);
+                }
+            } else if (request.type === 'FALLBACK_MODE') {
+                this.logger.info('FloatingUI', 'Fallback mode notification', request);
+                this.showFallbackNotice(request.message, request.transcriptionEnabled);
             }
         });
         
@@ -658,7 +668,7 @@ class FloatingUI {
         this.logger.info('FloatingUI', 'Logs exported', { filename });
     }
     
-    setTabPermission(hasPermission) {
+    setTabPermission(hasPermission, errorMessage = null) {
         this.hasTabPermission = hasPermission;
         const permissionNotice = this.shadowRoot.getElementById('permission-notice');
         
@@ -667,11 +677,61 @@ class FloatingUI {
                 // Hide the notice
                 permissionNotice.style.display = 'none';
             } else {
-                // Show the notice
+                // Show the notice with error message if provided
                 permissionNotice.style.display = 'block';
+                if (errorMessage) {
+                    permissionNotice.innerHTML = `⚠️ Tab audio error: ${errorMessage}`;
+                    permissionNotice.style.color = '#f44336';
+                    permissionNotice.style.borderColor = 'rgba(244, 67, 54, 0.3)';
+                    permissionNotice.style.backgroundColor = 'rgba(244, 67, 54, 0.1)';
+                }
             }
         }
         
-        this.logger.info('FloatingUI', 'Tab permission status updated', { hasPermission });
+        this.logger.info('FloatingUI', 'Tab permission status updated', { hasPermission, errorMessage });
+    }
+    
+    showFallbackNotice(message, transcriptionEnabled) {
+        // Create or update fallback notice
+        let fallbackNotice = this.shadowRoot.getElementById('fallback-notice');
+        
+        if (!fallbackNotice) {
+            // Create the notice element
+            fallbackNotice = document.createElement('div');
+            fallbackNotice.id = 'fallback-notice';
+            fallbackNotice.style.cssText = `
+                background: rgba(255, 193, 7, 0.1);
+                border: 1px solid rgba(255, 193, 7, 0.3);
+                border-radius: 8px;
+                padding: 10px;
+                margin-bottom: 12px;
+                font-size: 13px;
+                color: #ffc107;
+                text-align: center;
+            `;
+            
+            // Insert after permission notice or at the beginning of controls section
+            const controlsSection = this.shadowRoot.querySelector('.controls-section');
+            const permissionNotice = this.shadowRoot.getElementById('permission-notice');
+            
+            if (permissionNotice && permissionNotice.nextSibling) {
+                controlsSection.insertBefore(fallbackNotice, permissionNotice.nextSibling);
+            } else {
+                controlsSection.insertBefore(fallbackNotice, controlsSection.firstChild);
+            }
+        }
+        
+        // Update the notice content
+        fallbackNotice.innerHTML = `⚠️ ${message}`;
+        fallbackNotice.style.display = 'block';
+        
+        // Auto-hide after 10 seconds
+        setTimeout(() => {
+            if (fallbackNotice) {
+                fallbackNotice.style.display = 'none';
+            }
+        }, 10000);
+        
+        this.logger.info('FloatingUI', 'Showing fallback notice', { message, transcriptionEnabled });
     }
 }
