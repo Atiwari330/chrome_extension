@@ -196,6 +196,7 @@ class MeetTranscriptionExtension {
                 position: fixed !important;
                 width: 420px;
                 min-height: 500px;
+                max-height: 80vh;
                 background: rgba(32, 34, 37, 0.95) !important; /* Direct color instead of var */
                 backdrop-filter: blur(20px);
                 -webkit-backdrop-filter: blur(20px);
@@ -451,8 +452,9 @@ class MeetTranscriptionExtension {
                 flex: 1;
                 display: flex;
                 gap: 16px;
-                min-height: 300px;
+                min-height: 0;
                 margin-top: 16px;
+                overflow: hidden;
             }
 
             .transcription-pane {
@@ -466,6 +468,7 @@ class MeetTranscriptionExtension {
                 backdrop-filter: blur(10px);
                 -webkit-backdrop-filter: blur(10px);
                 transition: all 0.3s ease;
+                min-height: 0;
             }
             
             .transcription-pane.unified {
