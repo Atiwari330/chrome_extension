@@ -77,9 +77,25 @@ this.sessionContext = ''; // Store patient context
 ### Phase 2: Event Listener Management (CRITICAL FIX)
 **Problem**: Current code calls `setupEventListeners()` once after initial render. Re-rendering wipes innerHTML and destroys all listeners.
 
-**Solution**: Implement one of these approaches:
+**Solution A - Re-attach After Each Render (Simple but repetitive)**:
 ```javascript
-// Option 1: Re-attach listeners after each render
+// Update each render method to re-attach listeners
+renderInitialScreen() {
+    this.shadowRoot.innerHTML = `<!-- initial screen HTML -->`;
+    this.setupEventListeners(); // Re-attach after DOM update
+}
+
+renderContextScreen() {
+    this.shadowRoot.innerHTML = `<!-- context screen HTML -->`;
+    this.setupEventListeners(); // Re-attach after DOM update
+}
+
+renderTranscriptionScreen() {
+    this.shadowRoot.innerHTML = `<!-- transcription screen HTML -->`;
+    this.setupEventListeners(); // Re-attach after DOM update
+}
+
+// Main render method
 render() {
     if (this.currentScreen === 'initial') {
         this.renderInitialScreen();
@@ -88,29 +104,76 @@ render() {
     } else if (this.currentScreen === 'transcription') {
         this.renderTranscriptionScreen();
     }
-    // CRITICAL: Re-attach event listeners after DOM update
-    this.setupEventListeners();
-}
-
-// Option 2: Use event delegation (preferred)
-setupEventListeners() {
-    // Attach to shadowRoot once, handle all clicks
-    this.shadowRoot.addEventListener('click', (e) => {
-        const target = e.target.closest('[data-action]');
-        if (!target) return;
-        
-        switch(target.dataset.action) {
-            case 'add-context':
-                this.showContextScreen();
-                break;
-            case 'start-encounter':
-                this.startEncounter();
-                break;
-            // etc...
-        }
-    });
+    // Note: setupEventListeners() called inside each render method above
 }
 ```
+
+**Solution B - Event Delegation (Preferred - attach once)**:
+```javascript
+// In constructor, after initial render
+constructor(shadowRoot, contentScript) {
+    // ... existing constructor code ...
+    this.render();
+    this.setupDelegatedListeners(); // Call once, survives all re-renders
+}
+
+setupDelegatedListeners() {
+    // Attach to shadowRoot once, handle all future clicks
+    this.shadowRoot.addEventListener('click', (e) => {
+        // Handle all button clicks by data attribute
+        const button = e.target.closest('button[data-action]');
+        if (!button) return;
+        
+        const action = button.dataset.action;
+        switch(action) {
+            case 'add-context':
+                this.currentScreen = 'context';
+                this.render();
+                break;
+            case 'back-to-initial':
+                this.currentScreen = 'initial';
+                this.render();
+                break;
+            case 'start-encounter':
+                this.currentScreen = 'transcription';
+                this.render();
+                this.contentScript.startTranscription();
+                break;
+            case 'end-session':
+                this.contentScript.stopTranscription();
+                this.currentScreen = 'initial';
+                this.sessionContext = '';
+                this.render();
+                break;
+            case 'open-settings':
+                this.openSettings();
+                break;
+            // Add all other button handlers here
+        }
+    });
+    
+    // Separate listener for drag functionality (already on document)
+    // Keep existing drag listeners as-is
+}
+
+// Update HTML in render methods to use data-action
+renderInitialScreen() {
+    this.shadowRoot.innerHTML = `
+        <div id="floating-widget">
+            <!-- ... header ... -->
+            <button data-action="add-context">Add context</button>
+            <button data-action="start-encounter">Start encounter</button>
+            <button data-action="open-settings">Settings</button>
+        </div>
+    `;
+}
+```
+
+**Implementation Decision**: Use Solution B (event delegation) because:
+1. More performant - only one listener attachment
+2. Survives all DOM updates automatically  
+3. Easier to maintain - all click handling in one place
+4. No risk of forgetting to re-attach after a render
 
 **Justification**: Without this fix, buttons on second/third screens won't work at all.
 
