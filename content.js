@@ -223,8 +223,80 @@ class MeetTranscriptionExtension {
                 font-size: 14px;
             }
             
+            /* === FLEXIBLE HEIGHT — replaces old 600 px rule === */
+            :root {
+                --yuna-widget-min-h: 550px;
+                --yuna-widget-max-h: 80vh;
+            }
+            
             #floating-widget.transcription-mode {
-                min-height: 600px;
+                min-height: var(--yuna-widget-min-h);
+                max-height: var(--yuna-widget-max-h);
+                height: auto;
+                display: flex;
+                flex-direction: column;
+                overflow-x: hidden;
+            }
+            
+            /* === INNER FLEX CHAIN (scoped) === */
+            #floating-widget.transcription-mode .transcription-screen {
+                display: flex;
+                flex-direction: column;
+                height: 100%;
+            }
+            
+            #floating-widget.transcription-mode .transcription-section {
+                flex: 1;
+                margin: 8px 16px 0;
+                min-height: 0;
+                display: flex;
+                flex-direction: column;
+            }
+            
+            #floating-widget.transcription-mode .transcription-pane {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                height: 100%;
+            }
+            
+            #floating-widget.transcription-mode .transcription-content {
+                flex: 1;
+                overflow-y: auto;
+                min-height: 0;
+            }
+            
+            /* Critical: Constrain widget-body in transcription mode */
+            #floating-widget.transcription-mode .widget-body {
+                height: 100%;
+                overflow: hidden;
+                padding: 0; /* Remove the 20px padding that adds to height */
+            }
+            
+            /* Override the old min-height */
+            #floating-widget.transcription-mode .transcription-screen .transcription-section {
+                min-height: 0 !important; /* Override the 200px minimum */
+            }
+            
+            /* BRUTE FORCE FIX - Fixed heights with !important */
+            #floating-widget.transcription-mode {
+                height: 80vh !important;  /* Fixed height, not min/max */
+                max-height: 80vh !important;
+                overflow: hidden !important;  /* CRITICAL: Clip ALL overflow */
+                position: fixed !important;
+            }
+            
+            /* Ensure the entire chain respects the height */
+            #floating-widget.transcription-mode .widget-body {
+                height: calc(100% - 50px) !important;  /* Account for header */
+                overflow: hidden !important;
+            }
+            
+            /* Only the transcript content should scroll */
+            #floating-widget.transcription-mode .transcription-content {
+                height: 300px !important;  /* Fixed height for transcript area */
+                overflow-y: auto !important;
+                overflow-x: hidden !important;
             }
 
             #floating-widget:hover {
