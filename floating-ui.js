@@ -15,6 +15,10 @@ class FloatingUI {
         };
         this.hasTabPermission = false;
         
+        // Yuna UI state management
+        this.currentScreen = 'initial'; // 'initial', 'context', 'transcription'
+        this.sessionContext = ''; // Store patient context
+        
         this.logger.info('FloatingUI', 'Initializing floating UI');
         
         // Debug: Check what styles are in the shadow root
@@ -38,77 +42,192 @@ class FloatingUI {
         
         this.render();
         
-        // Wait for DOM to be ready before setting up event listeners
-        setTimeout(() => {
-            this.setupEventListeners();
-            this.setupTranscriptionListener();
-            this.logger.info('FloatingUI', 'Event listeners set up');
-        }, 100);
+        // Set up delegated event listeners (survives all re-renders)
+        this.setupDelegatedListeners();
+        
+        // Set up transcription message listener
+        this.setupTranscriptionListener();
+        
+        this.logger.info('FloatingUI', 'Yuna UI initialized with delegated listeners');
     }
 
     render() {
+        // Save existing style elements before innerHTML wipes them out
+        const existingStyles = Array.from(this.shadowRoot.querySelectorAll('style'));
+        
+        // Render appropriate screen based on current state
+        if (this.currentScreen === 'initial') {
+            this.renderInitialScreen();
+        } else if (this.currentScreen === 'context') {
+            this.renderContextScreen();
+        } else if (this.currentScreen === 'transcription') {
+            this.renderTranscriptionScreen();
+        }
+        
+        // Re-append the saved style elements
+        existingStyles.forEach(style => {
+            this.shadowRoot.appendChild(style);
+        });
+        
+        this.widget = this.shadowRoot.getElementById('floating-widget');
+        this.logger.info('FloatingUI', `UI rendered - screen: ${this.currentScreen}`);
+    }
+
+    renderInitialScreen() {
         const html = `
-            <div id="floating-widget" style="left: ${this.position.x}px; top: ${this.position.y}px; display: block !important; visibility: visible !important;">
+            <div id="floating-widget" class="yuna-widget" style="left: ${this.position.x}px; top: ${this.position.y}px; display: block !important; visibility: visible !important;">
                 <div class="widget-header">
                     <div class="header-title">
-                        <span class="status-indicator"></span>
-                        <span class="title-text">Meet Transcription</span>
+                        <span class="yuna-logo">Y</span>
+                        <span class="title-text">Yuna</span>
                     </div>
                     <div class="header-controls">
-                        <button id="minimize-btn" class="control-btn" title="Minimize">
+                        <button data-action="minimize" class="control-btn" title="Minimize">
                             <svg width="16" height="16" viewBox="0 0 16 16">
                                 <path d="M4 8h8v1H4z" fill="currentColor"/>
-                            </svg>
-                        </button>
-                        <button id="settings-btn" class="control-btn" title="Settings">
-                            <svg width="16" height="16" viewBox="0 0 16 16">
-                                <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z" fill="currentColor"/>
-                                <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.32zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.377l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115l.094-.319z" fill="currentColor"/>
                             </svg>
                         </button>
                     </div>
                 </div>
                 
-                <div class="widget-body">
-                    <div class="controls-section">
-                        ${!this.hasTabPermission ? `
-                            <div id="permission-notice" style="
-                                background: rgba(255, 152, 0, 0.1);
-                                border: 1px solid rgba(255, 152, 0, 0.3);
-                                border-radius: 8px;
-                                padding: 10px;
-                                margin-bottom: 12px;
-                                font-size: 13px;
-                                color: #ff9800;
-                                text-align: center;
-                            ">
-                                ⚠️ Click extension icon to enable audio from others
-                            </div>
-                        ` : ''}
-                        <button id="start-stop-btn" class="primary-btn">
-                            Start Recording
+                <div class="widget-body initial-screen">
+                    <div class="yuna-avatar-section">
+                        <div class="yuna-avatar">
+                            <span class="avatar-icon">Y</span>
+                        </div>
+                    </div>
+                    
+                    <div class="context-section">
+                        <h3 class="section-title">CONTEXT</h3>
+                        <button data-action="add-context" class="context-btn">
+                            <span class="plus-icon">+</span>
+                            Add context
                         </button>
-                        <div class="audio-indicators">
-                            <div class="indicator" id="mic-indicator">
-                                <span class="indicator-label">Mic</span>
-                                <div class="level-meter">
-                                    <div class="level-bar"></div>
-                                </div>
-                            </div>
-                            <div class="indicator" id="tab-indicator">
-                                <span class="indicator-label">Tab</span>
-                                <div class="level-meter">
-                                    <div class="level-bar"></div>
-                                </div>
+                    </div>
+                    
+                    <div class="settings-section">
+                        <h3 class="section-title">SETTINGS</h3>
+                        <button data-action="open-settings" class="settings-link">
+                            Configure API key and preferences
+                        </button>
+                    </div>
+                    
+                    <div class="action-section">
+                        <button data-action="start-encounter" class="primary-btn start-encounter-btn">
+                            <svg width="16" height="16" viewBox="0 0 16 16" style="margin-right: 8px;">
+                                <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z" fill="currentColor"/>
+                            </svg>
+                            Start encounter
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        this.shadowRoot.innerHTML = html;
+    }
+
+    renderContextScreen() {
+        const html = `
+            <div id="floating-widget" class="yuna-widget" style="left: ${this.position.x}px; top: ${this.position.y}px; display: block !important; visibility: visible !important;">
+                <div class="widget-header">
+                    <div class="header-title">
+                        <span class="yuna-logo">Y</span>
+                        <span class="title-text">Yuna</span>
+                    </div>
+                    <div class="header-controls">
+                        <button data-action="back-to-initial" class="control-btn" title="Back">
+                            <svg width="16" height="16" viewBox="0 0 16 16">
+                                <path d="M11 8H5.41l2.3-2.29a1 1 0 1 0-1.42-1.42l-4 4a1 1 0 0 0 0 1.42l4 4a1 1 0 0 0 1.42-1.42L5.41 10H11a1 1 0 0 0 0-2z" fill="currentColor"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="widget-body context-screen">
+                    <div class="yuna-avatar-section">
+                        <div class="yuna-avatar">
+                            <span class="avatar-icon">Y</span>
+                        </div>
+                    </div>
+                    
+                    <div class="context-input-section">
+                        <h3 class="section-title">CONTEXT</h3>
+                        <div class="context-input-wrapper">
+                            <textarea 
+                                id="context-textarea"
+                                class="context-textarea"
+                                placeholder="Patient name, age, presenting concerns, session type..."
+                                rows="4"
+                            >${this.sessionContext}</textarea>
+                            <div class="mic-icon">
+                                <svg width="20" height="20" viewBox="0 0 20 20">
+                                    <path d="M10 12a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v4a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H3a7 7 0 0 0 6 6.93V19h2v-3.07A7 7 0 0 0 17 9h-2z" fill="currentColor" opacity="0.5"/>
+                                </svg>
                             </div>
                         </div>
                     </div>
+                    
+                    <div class="action-section">
+                        <button data-action="start-encounter" class="primary-btn start-encounter-btn">
+                            <svg width="16" height="16" viewBox="0 0 16 16" style="margin-right: 8px;">
+                                <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z" fill="currentColor"/>
+                            </svg>
+                            Start encounter
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        this.shadowRoot.innerHTML = html;
+        
+        // Set up context textarea listener
+        const textarea = this.shadowRoot.getElementById('context-textarea');
+        if (textarea) {
+            textarea.addEventListener('input', (e) => {
+                this.sessionContext = e.target.value;
+            });
+        }
+    }
+
+    renderTranscriptionScreen() {
+        const html = `
+            <div id="floating-widget" class="yuna-widget transcription-mode" style="left: ${this.position.x}px; top: ${this.position.y}px; display: block !important; visibility: visible !important;">
+                <div class="widget-header">
+                    <div class="header-title">
+                        <span class="status-indicator active"></span>
+                        <span class="yuna-logo">Y</span>
+                        <span class="title-text">Yuna</span>
+                    </div>
+                    <div class="header-controls">
+                        <button data-action="minimize" class="control-btn" title="Minimize">
+                            <svg width="16" height="16" viewBox="0 0 16 16">
+                                <path d="M4 8h8v1H4z" fill="currentColor"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="widget-body transcription-screen">
+                    ${this.sessionContext ? `
+                        <div class="patient-context-box">
+                            <h4>Patient context</h4>
+                            <p>${this.sessionContext}</p>
+                        </div>
+                    ` : ''}
+                    
+                    ${!this.hasTabPermission ? `
+                        <div id="permission-notice" class="permission-notice">
+                            ⚠️ Click extension icon to enable audio from others
+                        </div>
+                    ` : ''}
                     
                     <div class="transcription-section">
                         <div class="transcription-pane unified">
                             <div class="pane-header">
                                 <h3>Transcript</h3>
-                                <button class="clear-btn" data-target="unified-transcription" title="Clear">
+                                <button data-action="clear-transcript" class="clear-btn" title="Clear">
                                     <svg width="14" height="14" viewBox="0 0 14 14">
                                         <path d="M14 1.41L12.59 0L7 5.59L1.41 0L0 1.41L5.59 7L0 12.59L1.41 14L7 8.41L12.59 14L14 12.59L8.41 7L14 1.41Z" fill="currentColor"/>
                                     </svg>
@@ -120,70 +239,119 @@ class FloatingUI {
                         </div>
                     </div>
                     
-                    <div class="log-section collapsed" id="log-section">
-                        <div class="log-header">
-                            <button id="toggle-logs" class="toggle-btn">
-                                <svg width="12" height="12" viewBox="0 0 12 12">
-                                    <path d="M3 5l3 3 3-3" stroke="currentColor" fill="none"/>
-                                </svg>
-                                <span>Logs</span>
-                            </button>
-                            <button id="export-logs" class="export-btn">Export</button>
+                    <div class="audio-indicators">
+                        <div class="indicator" id="mic-indicator">
+                            <span class="indicator-label">Your mic</span>
+                            <div class="level-meter">
+                                <div class="level-bar"></div>
+                            </div>
                         </div>
-                        <div class="log-content" id="log-content"></div>
+                        <div class="indicator" id="tab-indicator">
+                            <span class="indicator-label">Client audio</span>
+                            <div class="level-meter">
+                                <div class="level-bar"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="controls-section">
+                        <button data-action="end-session" class="primary-btn end-session-btn">
+                            End session
+                        </button>
                     </div>
                 </div>
-                
-                <div class="resize-handle"></div>
             </div>
         `;
         
-        // Check styles before innerHTML
-        console.log('FLOATING-UI: Style elements BEFORE innerHTML:', this.shadowRoot.querySelectorAll('style').length);
-        
-        // Save existing style elements before innerHTML wipes them out
-        const existingStyles = Array.from(this.shadowRoot.querySelectorAll('style'));
-        
-        // Set innerHTML (this will clear everything)
         this.shadowRoot.innerHTML = html;
-        
-        // Re-append the saved style elements
-        existingStyles.forEach(style => {
-            this.shadowRoot.appendChild(style);
+    }
+
+    setupDelegatedListeners() {
+        // Single click handler for all buttons using event delegation
+        this.shadowRoot.addEventListener('click', (e) => {
+            // Handle button clicks by data-action attribute
+            const button = e.target.closest('button[data-action]');
+            if (button) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const action = button.dataset.action;
+                this.logger.info('FloatingUI', `Button clicked: ${action}`);
+                
+                switch(action) {
+                    case 'add-context':
+                        this.currentScreen = 'context';
+                        this.render();
+                        break;
+                        
+                    case 'back-to-initial':
+                        this.currentScreen = 'initial';
+                        this.render();
+                        break;
+                        
+                    case 'start-encounter':
+                        // If we're on context screen, grab the textarea value first
+                        if (this.currentScreen === 'context') {
+                            const textarea = this.shadowRoot.getElementById('context-textarea');
+                            if (textarea) {
+                                this.sessionContext = textarea.value;
+                            }
+                        }
+                        
+                        if (this.sessionContext.trim()) {
+                            this.currentScreen = 'transcription';
+                            this.render();
+                            this.contentScript.startTranscription();
+                        } else {
+                            // If no context, go to context screen
+                            this.currentScreen = 'context';
+                            this.render();
+                        }
+                        break;
+                        
+                    case 'end-session':
+                        this.contentScript.stopTranscription();
+                        this.currentScreen = 'initial';
+                        this.sessionContext = '';
+                        this.render();
+                        break;
+                        
+                    case 'open-settings':
+                        this.openSettings();
+                        break;
+                        
+                    case 'minimize':
+                        this.toggleMinimize();
+                        break;
+                        
+                    case 'clear-transcript':
+                        this.clearTranscription('unified-transcription');
+                        break;
+                        
+                    case 'toggle-logs':
+                        this.toggleLogs();
+                        break;
+                        
+                    case 'export-logs':
+                        this.exportLogs();
+                        break;
+                }
+            }
         });
         
-        // Check styles after innerHTML - should be restored now!
-        console.log('FLOATING-UI: Style elements AFTER innerHTML:', this.shadowRoot.querySelectorAll('style').length);
+        // Keep existing drag functionality
+        document.addEventListener('mousemove', this.drag.bind(this));
+        document.addEventListener('mouseup', this.stopDrag.bind(this));
         
-        this.widget = this.shadowRoot.getElementById('floating-widget');
-        
-        // Debug: Check computed styles
-        setTimeout(() => {
-            if (this.widget) {
-                const computedStyle = window.getComputedStyle(this.widget);
-                const rootComputedStyle = window.getComputedStyle(this.shadowRoot.host);
-                
-                console.log('FLOATING-UI: Widget element exists:', !!this.widget);
-                console.log('FLOATING-UI: Widget computed backgroundColor:', computedStyle.backgroundColor);
-                console.log('FLOATING-UI: Widget inline style:', this.widget.getAttribute('style'));
-                
-                // Check if any styles are actually applied to the widget
-                const allStyles = this.shadowRoot.querySelectorAll('style');
-                console.log('FLOATING-UI: Total style elements in shadow at render time:', allStyles.length);
-                
-                this.logger.info('FloatingUI', 'Widget computed styles', {
-                    background: computedStyle.background,
-                    backgroundColor: computedStyle.backgroundColor,
-                    opacity: computedStyle.opacity,
-                    visibility: computedStyle.visibility,
-                    display: computedStyle.display,
-                    cssVarBgDark: computedStyle.getPropertyValue('--bg-dark'),
-                    rootCssVarBgDark: rootComputedStyle.getPropertyValue('--bg-dark')
-                });
+        // Drag handler for header (delegated)
+        this.shadowRoot.addEventListener('mousedown', (e) => {
+            const header = e.target.closest('.widget-header');
+            if (header && !e.target.closest('.control-btn')) {
+                this.startDrag(e);
             }
-        }, 100);
+        });
         
-        this.logger.info('FloatingUI', 'UI rendered');
+        this.logger.info('FloatingUI', 'Delegated event listeners attached');
     }
 
     setupEventListeners() {
@@ -437,42 +605,41 @@ class FloatingUI {
     }
 
     async toggleRecording() {
-        this.logger.info('FloatingUI', 'toggleRecording called');
-        const btn = this.shadowRoot.getElementById('start-stop-btn');
-        
-        this.logger.debug('FloatingUI', 'Current state', {
-            isTranscribing: this.contentScript.isTranscribing,
-            contentScriptExists: !!this.contentScript
-        });
+        // This method is deprecated in the new UI but kept for compatibility
+        this.logger.info('FloatingUI', 'toggleRecording called (deprecated method)');
         
         if (this.contentScript.isTranscribing) {
             // Stop recording
             this.contentScript.stopTranscription();
-            btn.textContent = 'Start Recording';
-            btn.classList.remove('recording');
-            this.shadowRoot.querySelector('.status-indicator').classList.remove('active');
+            this.setTranscribing(false);
         } else {
-            // API key is now hardcoded in service worker, no need to check
-            
             // Start recording
             this.contentScript.startTranscription();
-            btn.textContent = 'Stop Recording';
-            btn.classList.add('recording');
-            this.shadowRoot.querySelector('.status-indicator').classList.add('active');
+            this.setTranscribing(true);
         }
     }
 
     setTranscribing(isTranscribing) {
-        const btn = this.shadowRoot.getElementById('start-stop-btn');
-        if (isTranscribing) {
-            btn.textContent = 'Stop Recording';
-            btn.classList.add('recording');
-            this.shadowRoot.querySelector('.status-indicator').classList.add('active');
-        } else {
-            btn.textContent = 'Start Recording';
-            btn.classList.remove('recording');
-            this.shadowRoot.querySelector('.status-indicator').classList.remove('active');
+        // In the new UI, we don't have a start-stop-btn, but we do have status indicator
+        const statusIndicator = this.shadowRoot.querySelector('.status-indicator');
+        
+        if (statusIndicator) {
+            if (isTranscribing) {
+                statusIndicator.classList.add('active');
+            } else {
+                statusIndicator.classList.remove('active');
+            }
         }
+        
+        // Log the transcription state
+        this.logger.info('FloatingUI', `Transcription state changed: ${isTranscribing}`);
+    }
+
+    getTimestamp() {
+        const now = new Date();
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const seconds = String(now.getSeconds()).padStart(2, '0');
+        return `${minutes}:${seconds}`;
     }
 
     updateTranscription(source, text, isFinal) {
@@ -492,7 +659,7 @@ class FloatingUI {
         }
         
         // Determine speaker label
-        const speakerLabel = source === 'user' ? 'Provider' : 'Client';
+        const speakerLabel = source === 'user' ? 'You' : 'Client';
         const speakerClass = source === 'user' ? 'speaker-provider' : 'speaker-client';
         
         if (isFinal) {
@@ -509,11 +676,7 @@ class FloatingUI {
             
             const timestamp = document.createElement('span');
             timestamp.className = 'timestamp';
-            timestamp.textContent = `[${new Date().toLocaleTimeString('en-US', { 
-                hour: '2-digit', 
-                minute: '2-digit',
-                second: '2-digit'
-            })}]`;
+            timestamp.textContent = this.getTimestamp();
             
             const speaker = document.createElement('span');
             speaker.className = `speaker ${speakerClass}`;
@@ -542,11 +705,7 @@ class FloatingUI {
                 
                 const timestamp = document.createElement('span');
                 timestamp.className = 'timestamp';
-                timestamp.textContent = `[${new Date().toLocaleTimeString('en-US', { 
-                    hour: '2-digit', 
-                    minute: '2-digit',
-                    second: '2-digit'
-                })}]`;
+                timestamp.textContent = this.getTimestamp();
                 
                 const speaker = document.createElement('span');
                 speaker.className = `speaker ${speakerClass}`;
@@ -571,11 +730,7 @@ class FloatingUI {
             // Update timestamp for interim
             const timestampSpan = interim.querySelector('.timestamp');
             if (timestampSpan) {
-                timestampSpan.textContent = `[${new Date().toLocaleTimeString('en-US', { 
-                    hour: '2-digit', 
-                    minute: '2-digit',
-                    second: '2-digit'
-                })}]`;
+                timestampSpan.textContent = this.getTimestamp();
             }
             
             // Auto-scroll to bottom
@@ -588,7 +743,16 @@ class FloatingUI {
     updateAudioLevel(source, level) {
         const indicatorId = source === 'user' ? 'mic-indicator' : 'tab-indicator';
         const indicator = this.shadowRoot.getElementById(indicatorId);
+        
+        // Null guard - element may not exist on current screen
+        if (!indicator) {
+            return;
+        }
+        
         const levelBar = indicator.querySelector('.level-bar');
+        if (!levelBar) {
+            return;
+        }
         
         // Update level bar width (0-100%)
         levelBar.style.width = `${Math.min(100, level * 100)}%`;

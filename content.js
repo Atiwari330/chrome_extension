@@ -170,22 +170,27 @@ class MeetTranscriptionExtension {
         console.log('CONTENT.JS: About to inject CSS with length:', style.textContent ? style.textContent.length : 0);
         
         style.textContent = `
-            /* styles.css - Styles for the floating transcription widget */
+            /* Yuna UI - Styles for the floating transcription widget */
 
             :host {
                 all: initial;
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-                --primary-color: #5865F2;
-                --secondary-color: #4752C4;
-                --success-color: #3BA55C;
-                --danger-color: #ED4245;
-                --warning-color: #FAA61A;
-                --bg-dark: rgba(32, 34, 37, 0.95);
+                --primary-color: #7C3AED;
+                --primary-hover: #6D28D9;
+                --secondary-color: #4C1D95;
+                --success-color: #10B981;
+                --danger-color: #EF4444;
+                --warning-color: #F59E0B;
+                --bg-dark: rgba(17, 24, 39, 0.95);
+                --bg-darker: rgba(9, 12, 20, 0.98);
                 --bg-light: rgba(255, 255, 255, 0.95);
-                --text-primary: #FFFFFF;
-                --text-secondary: #B9BBBE;
-                --text-muted: #72767D;
+                --text-primary: #F9FAFB;
+                --text-secondary: #D1D5DB;
+                --text-muted: #9CA3AF;
                 --border-color: rgba(255, 255, 255, 0.1);
+                --purple-gradient: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%);
+                --glass-bg: rgba(31, 41, 55, 0.8);
+                --glass-border: rgba(255, 255, 255, 0.08);
             }
 
             * {
@@ -194,23 +199,32 @@ class MeetTranscriptionExtension {
 
             #floating-widget {
                 position: fixed !important;
-                width: 420px;
-                min-height: 500px;
+                width: 380px;
+                min-height: 480px;
                 max-height: 80vh;
-                background: rgba(32, 34, 37, 0.95) !important; /* Direct color instead of var */
+                background: var(--bg-darker) !important;
                 backdrop-filter: blur(20px);
                 -webkit-backdrop-filter: blur(20px);
-                border-radius: 16px;
-                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 
-                            0 0 0 1px rgba(255, 255, 255, 0.1);
+                border-radius: 20px;
+                box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3), 
+                            0 10px 10px -5px rgba(0, 0, 0, 0.04),
+                            0 0 0 1px var(--glass-border);
                 z-index: 2147483647 !important;
                 display: flex !important;
                 flex-direction: column;
                 transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
                 pointer-events: auto !important;
                 visibility: visible !important;
-                opacity: 0.95 !important;
+                opacity: 1 !important;
                 overflow: hidden;
+            }
+            
+            #floating-widget.yuna-widget {
+                font-size: 14px;
+            }
+            
+            #floating-widget.transcription-mode {
+                min-height: 600px;
             }
 
             #floating-widget:hover {
@@ -237,13 +251,14 @@ class MeetTranscriptionExtension {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                padding: 16px 20px;
-                background: linear-gradient(135deg, #5865F2, #4752C4) !important; /* Direct colors */
-                color: #FFFFFF !important;
+                padding: 20px 24px;
+                background: transparent;
+                color: var(--text-primary);
                 cursor: grab;
                 user-select: none;
                 position: relative;
                 overflow: hidden;
+                border-bottom: 1px solid var(--glass-border);
             }
 
             .widget-header::before {
@@ -831,6 +846,329 @@ class MeetTranscriptionExtension {
                 height: 6px;
                 border-right: 2px solid var(--text-muted);
                 border-bottom: 2px solid var(--text-muted);
+            }
+            
+            /* Yuna-specific styles */
+            .yuna-logo {
+                width: 24px;
+                height: 24px;
+                background: var(--purple-gradient);
+                border-radius: 6px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: 700;
+                font-size: 14px;
+                color: white;
+                margin-right: 8px;
+            }
+            
+            .yuna-avatar-section {
+                display: flex;
+                justify-content: center;
+                padding: 40px 0 30px;
+            }
+            
+            .yuna-avatar {
+                width: 120px;
+                height: 120px;
+                background: var(--purple-gradient);
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                box-shadow: 0 8px 16px rgba(124, 58, 237, 0.3);
+            }
+            
+            .avatar-icon {
+                font-size: 48px;
+                font-weight: 700;
+                color: white;
+            }
+            
+            /* Section styles */
+            .section-title {
+                font-size: 11px;
+                font-weight: 600;
+                letter-spacing: 1.5px;
+                text-transform: uppercase;
+                color: var(--text-muted);
+                margin: 0 0 12px 0;
+            }
+            
+            .context-section,
+            .settings-section {
+                padding: 0 24px 24px;
+            }
+            
+            .context-btn {
+                width: 100%;
+                padding: 16px;
+                background: var(--glass-bg);
+                border: 1px solid var(--glass-border);
+                border-radius: 12px;
+                color: var(--text-secondary);
+                font-size: 14px;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            
+            .context-btn:hover {
+                background: rgba(124, 58, 237, 0.1);
+                border-color: rgba(124, 58, 237, 0.3);
+                color: var(--text-primary);
+            }
+            
+            .plus-icon {
+                width: 20px;
+                height: 20px;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 50%;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 16px;
+            }
+            
+            .settings-link {
+                background: none;
+                border: none;
+                color: var(--text-muted);
+                font-size: 13px;
+                cursor: pointer;
+                padding: 0;
+                text-decoration: underline;
+                transition: color 0.2s ease;
+            }
+            
+            .settings-link:hover {
+                color: var(--text-secondary);
+            }
+            
+            .action-section {
+                padding: 24px;
+                margin-top: auto;
+                border-top: 1px solid var(--glass-border);
+            }
+            
+            .start-encounter-btn {
+                width: 100%;
+                padding: 16px;
+                background: var(--purple-gradient);
+                border: none;
+                border-radius: 12px;
+                color: white;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+            }
+            
+            .start-encounter-btn:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 6px 20px rgba(124, 58, 237, 0.4);
+            }
+            
+            /* Context screen styles */
+            .context-screen .widget-body {
+                display: flex;
+                flex-direction: column;
+            }
+            
+            .context-input-section {
+                padding: 0 24px;
+                flex: 1;
+            }
+            
+            .context-input-wrapper {
+                position: relative;
+            }
+            
+            .context-textarea {
+                width: 100%;
+                padding: 16px;
+                padding-right: 48px;
+                background: var(--glass-bg);
+                border: 1px solid var(--glass-border);
+                border-radius: 12px;
+                color: var(--text-primary);
+                font-size: 14px;
+                resize: none;
+                transition: all 0.2s ease;
+                line-height: 1.5;
+            }
+            
+            .context-textarea:focus {
+                outline: none;
+                border-color: rgba(124, 58, 237, 0.5);
+                background: rgba(124, 58, 237, 0.05);
+            }
+            
+            .context-textarea::placeholder {
+                color: var(--text-muted);
+            }
+            
+            .mic-icon {
+                position: absolute;
+                right: 16px;
+                top: 50%;
+                transform: translateY(-50%);
+                pointer-events: none;
+            }
+            
+            /* Transcription screen styles */
+            .transcription-screen {
+                display: flex;
+                flex-direction: column;
+                height: 100%;
+            }
+            
+            .patient-context-box {
+                margin: 16px 16px 0;
+                padding: 16px;
+                background: var(--glass-bg);
+                border: 1px solid var(--glass-border);
+                border-radius: 12px;
+            }
+            
+            .patient-context-box h4 {
+                margin: 0 0 8px 0;
+                font-size: 12px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                color: var(--text-muted);
+            }
+            
+            .patient-context-box p {
+                margin: 0;
+                font-size: 14px;
+                color: var(--text-secondary);
+                line-height: 1.5;
+            }
+            
+            .permission-notice {
+                margin: 16px;
+                padding: 12px 16px;
+                background: rgba(245, 158, 11, 0.1);
+                border: 1px solid rgba(245, 158, 11, 0.3);
+                border-radius: 8px;
+                font-size: 13px;
+                color: var(--warning-color);
+                text-align: center;
+            }
+            
+            .transcription-screen .transcription-section {
+                flex: 1;
+                margin: 16px;
+                min-height: 200px;
+            }
+            
+            .transcription-screen .transcription-pane {
+                height: 100%;
+                background: var(--glass-bg);
+                border-color: var(--glass-border);
+            }
+            
+            .transcription-screen .controls-section {
+                padding: 16px;
+                border-top: 1px solid var(--glass-border);
+                margin: 0;
+            }
+            
+            .end-session-btn {
+                width: 100%;
+                padding: 12px;
+                background: rgba(239, 68, 68, 0.1);
+                border: 1px solid rgba(239, 68, 68, 0.3);
+                border-radius: 10px;
+                color: var(--danger-color);
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s ease;
+            }
+            
+            .end-session-btn:hover {
+                background: rgba(239, 68, 68, 0.2);
+                transform: translateY(-1px);
+            }
+            
+            /* Update transcription entry styles */
+            .transcription-entry {
+                margin-bottom: 16px;
+                padding: 12px 16px;
+                background: rgba(255, 255, 255, 0.02);
+                border-radius: 8px;
+                border-left: none;
+                transition: all 0.2s ease;
+                animation: slideIn 0.3s ease-out;
+                line-height: 1.6;
+            }
+            
+            .transcription-entry .timestamp {
+                display: inline-block;
+                font-size: 11px;
+                color: var(--text-muted);
+                margin-right: 12px;
+                font-family: 'SF Mono', Monaco, monospace;
+            }
+            
+            .transcription-entry .speaker {
+                display: inline-block;
+                font-weight: 600;
+                margin-right: 8px;
+                font-size: 13px;
+            }
+            
+            .transcription-entry .speaker-provider {
+                color: #818CF8;
+            }
+            
+            .transcription-entry .speaker-client {
+                color: #34D399;
+            }
+            
+            /* Update audio indicators */
+            .transcription-screen .audio-indicators {
+                display: flex;
+                gap: 12px;
+                margin: 0 16px 16px;
+            }
+            
+            .transcription-screen .indicator {
+                background: var(--glass-bg);
+                border-color: var(--glass-border);
+            }
+            
+            /* Update primary button styles */
+            .primary-btn {
+                padding: 12px 24px;
+                border: none;
+                background: var(--purple-gradient);
+                color: white;
+                border-radius: 10px;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                position: relative;
+                overflow: hidden;
+                text-transform: none;
+                letter-spacing: normal;
+            }
+            
+            .primary-btn:hover {
+                background: var(--purple-gradient);
+                transform: translateY(-1px);
+                box-shadow: 0 4px 12px rgba(124, 58, 237, 0.4);
             }
         `;
         
