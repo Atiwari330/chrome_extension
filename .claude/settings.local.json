@@ -4,7 +4,9 @@
       "WebFetch(domain:developers.deepgram.com)",
       "Bash(ls:*)",
       "Bash(rm:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(find:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": []
   }
