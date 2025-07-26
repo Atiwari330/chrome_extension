@@ -1314,6 +1314,36 @@ class MeetTranscriptionExtension {
         }, 200); // Increased delay to ensure styles are processed
     }
 
+    showUI() {
+        const container = document.getElementById('meet-transcription-container');
+        if (container) {
+            container.style.display = 'block';
+            this.logger.info('Content', 'UI shown');
+            
+            // If we have a floating UI instance, call its show method
+            if (this.floatingUI && this.floatingUI.show) {
+                this.floatingUI.show();
+            }
+        } else {
+            this.logger.warn('Content', 'Cannot show UI - container not found');
+        }
+    }
+
+    hideUI() {
+        const container = document.getElementById('meet-transcription-container');
+        if (container) {
+            container.style.display = 'none';
+            this.logger.info('Content', 'UI hidden');
+            
+            // If we have a floating UI instance, call its hide method
+            if (this.floatingUI && this.floatingUI.hide) {
+                this.floatingUI.hide();
+            }
+        } else {
+            this.logger.warn('Content', 'Cannot hide UI - container not found');
+        }
+    }
+
     showPermissionError(error) {
         // Create a simple error message
         const errorDiv = document.createElement('div');
@@ -1441,6 +1471,28 @@ class MeetTranscriptionExtension {
                             notificationDiv.parentNode.removeChild(notificationDiv);
                         }
                     }, 4000);
+                    
+                    sendResponse({ success: true });
+                    break;
+                    
+                case 'TOGGLE_UI':
+                    this.logger.info('Content', 'UI toggle request received', request);
+                    
+                    // Update visibility state
+                    this.uiVisible = request.visible;
+                    this.saveUIVisibilityState();
+                    
+                    if (request.visible) {
+                        // Show the UI
+                        if (!this.floatingUI) {
+                            this.createFloatingUI();
+                        } else {
+                            this.showUI();
+                        }
+                    } else {
+                        // Hide the UI
+                        this.hideUI();
+                    }
                     
                     sendResponse({ success: true });
                     break;

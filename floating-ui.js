@@ -49,6 +49,37 @@ class FloatingUI {
         this.setupTranscriptionListener();
         
         this.logger.info('FloatingUI', 'Yuna UI initialized with delegated listeners');
+        
+        // Track visibility state
+        this.isVisible = true;
+        this.transcriptionBuffer = [];
+    }
+
+    show() {
+        this.isVisible = true;
+        const widget = this.shadowRoot.getElementById('floating-widget');
+        if (widget) {
+            widget.style.display = 'block';
+            widget.style.visibility = 'visible';
+            
+            // Flush any buffered transcriptions
+            if (this.transcriptionBuffer.length > 0) {
+                this.logger.info('FloatingUI', `Flushing ${this.transcriptionBuffer.length} buffered transcriptions`);
+                this.transcriptionBuffer.forEach(({ source, text, isFinal }) => {
+                    this.updateTranscription(source, text, isFinal);
+                });
+                this.transcriptionBuffer = [];
+            }
+        }
+    }
+
+    hide() {
+        this.isVisible = false;
+        const widget = this.shadowRoot.getElementById('floating-widget');
+        if (widget) {
+            widget.style.display = 'none';
+            widget.style.visibility = 'hidden';
+        }
     }
 
     render() {
@@ -645,10 +676,21 @@ class FloatingUI {
     updateTranscription(source, text, isFinal) {
         this.logger.info('FloatingUI', 'Updating transcription', { source, text, isFinal });
         
+        // Buffer transcriptions if UI is hidden
+        if (!this.isVisible) {
+            this.transcriptionBuffer.push({ source, text, isFinal });
+            this.logger.info('FloatingUI', 'Buffering transcription while hidden', { bufferSize: this.transcriptionBuffer.length });
+            return;
+        }
+        
         const element = this.shadowRoot.getElementById('unified-transcription');
         
         if (!element) {
             this.logger.error('FloatingUI', 'Transcription element not found');
+            // If we're on wrong screen, also buffer
+            if (this.currentScreen !== 'transcription') {
+                this.transcriptionBuffer.push({ source, text, isFinal });
+            }
             return;
         }
         

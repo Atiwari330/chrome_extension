@@ -716,7 +716,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // Keep message channel open
 });
 
-// Handle extension icon clicks to grant activeTab permission
+// Handle extension icon clicks to grant activeTab permission and toggle UI
 chrome.action.onClicked.addListener(async (tab) => {
     console.log('[Service Worker] Extension icon clicked for tab:', tab.id, tab.url);
     
@@ -734,15 +734,35 @@ chrome.action.onClicked.addListener(async (tab) => {
         console.log('[Service Worker] Could not persist granted tabs:', error);
     }
     
-    // Notify the tab that permission has been granted
-    // Content scripts are already injected by manifest
+    // Get current UI visibility state
+    let uiVisible = false;
+    try {
+        const result = await chrome.storage.local.get(['uiVisible']);
+        uiVisible = result.uiVisible === true;
+        console.log('[Service Worker] Current UI visibility:', uiVisible);
+    } catch (error) {
+        console.log('[Service Worker] Error getting UI visibility:', error);
+    }
+    
+    // Toggle the UI visibility state
+    const newVisibility = !uiVisible;
+    try {
+        await chrome.storage.local.set({ uiVisible: newVisibility });
+        console.log('[Service Worker] UI visibility toggled to:', newVisibility);
+    } catch (error) {
+        console.log('[Service Worker] Error saving UI visibility:', error);
+    }
+    
+    // Notify the tab about both permission grant and UI toggle
     chrome.tabs.sendMessage(tab.id, {
-        type: 'PERMISSION_GRANTED',
+        type: 'TOGGLE_UI',
+        visible: newVisibility,
+        permissionGranted: true,
         tabId: tab.id
     }).then(() => {
-        console.log('[Service Worker] Permission grant notification sent successfully');
+        console.log('[Service Worker] UI toggle notification sent successfully');
     }).catch(err => {
-        console.log('[Service Worker] Could not notify tab of permission grant:', err);
+        console.log('[Service Worker] Could not notify tab of UI toggle:', err);
     });
 });
 
