@@ -4,6 +4,8 @@
 
 This plan outlines the implementation of a toggle feature for the Yuna Chrome Extension's floating UI. Currently, the UI appears automatically when users navigate to Google Meet. The desired behavior is for the UI to only appear when users explicitly click the extension icon in the Chrome toolbar.
 
+**CRITICAL**: The transcription functionality MUST remain intact. The audio pipeline (microphone and tab audio capture → WebSocket → Deepgram) works correctly and must not be broken.
+
 ## Current Behavior (Problem Statement)
 
 1. User navigates to Google Meet
@@ -34,6 +36,25 @@ This plan outlines the implementation of a toggle feature for the Yuna Chrome Ex
 - Current handler only manages tab audio permissions via `PERMISSION_GRANTED` message
 - Floating UI is created automatically in content.js when detecting a Google Meet session
 - No existing mechanism to toggle UI visibility via extension icon
+
+### Critical Audio Flow Dependencies
+**DO NOT MODIFY THESE FLOWS:**
+
+1. **Microphone Audio Flow**:
+   - `content.js` → `startTranscription()` → `getUserMedia()` → `audioProcessor.startMicrophoneProcessing()`
+   - Audio data → `AudioWorkletNode` → PCM extraction → Base64 encoding → Service Worker
+   - Service Worker → WebSocket (user) → Deepgram
+
+2. **Tab Audio Flow**:
+   - `content.js` → `requestTabAudio()` → Service Worker → `chrome.tabCapture.capture()`
+   - Stream ID → Offscreen document → `getUserMedia(streamId)` → AudioWorklet
+   - Audio data → Base64 → Service Worker → WebSocket (others) → Deepgram
+
+3. **UI-Audio Integration Points**:
+   - `startTranscription()` is triggered by "Start encounter" button click
+   - `stopTranscription()` is triggered by "End session" button click
+   - Audio levels update UI via `updateAudioLevel()` calls
+   - Transcriptions update UI via Chrome runtime messages
 
 ## Implementation Epics
 
@@ -118,14 +139,22 @@ This plan outlines the implementation of a toggle feature for the Yuna Chrome Ex
 - UI is not created automatically when visiting Google Meet
 - Microphone permission flow still works correctly
 - UI can be created on-demand via extension icon
+- Audio processing capabilities remain intact even when UI is not visible
 
 **Implementation Tasks**:
 1. Modify `init()` method in content.js
 2. Check stored visibility state before creating UI
 3. Separate permission handling from UI creation
 4. Ensure UI creation can be triggered later
+5. **CRITICAL**: Keep all audio initialization code intact - only skip `createFloatingUI()` call
 
 **Code Location**: content.js, lines 17-46
+
+**Safety Checks**:
+- Verify `setupMessageListeners()` is still called (needed for audio messages)
+- Verify `setupDOMObserver()` is still called (needed for UI re-injection)
+- Ensure microphone permission iframe can still be injected when needed
+- Test that audio streams can be started even if UI was never shown
 
 ### Epic 4: Enhance UI Component for Visibility Control
 
@@ -141,12 +170,50 @@ This plan outlines the implementation of a toggle feature for the Yuna Chrome Ex
 - Methods handle CSS display properties correctly
 - Widget state is preserved when hidden
 - Drag position is maintained across show/hide cycles
+- **CRITICAL**: Audio continues processing when UI is hidden
+- **CRITICAL**: Transcription data is buffered when UI is hidden
 
 **Implementation Tasks**:
 1. Add `show()` method to FloatingUI class
 2. Add `hide()` method to FloatingUI class
 3. Ensure minimize state is independent of visibility
 4. Test with active transcription sessions
+5. Add null checks to `updateAudioLevel()` and `updateTranscription()` methods
+6. Implement transcription buffer to store messages while UI is hidden
+
+**Safety Implementation Details**:
+```javascript
+// In floating-ui.js
+hide() {
+    // Only hide the container, don't destroy it
+    const container = document.getElementById('meet-transcription-container');
+    if (container) {
+        container.style.display = 'none';
+        this.isVisible = false;
+    }
+    // Audio processing continues unaffected
+}
+
+show() {
+    const container = document.getElementById('meet-transcription-container');
+    if (container) {
+        container.style.display = 'block';
+        this.isVisible = true;
+        // Apply any buffered transcriptions
+        this.flushTranscriptionBuffer();
+    }
+}
+
+// Add to updateTranscription method:
+updateTranscription(source, text, isFinal) {
+    if (!this.isVisible) {
+        // Buffer the transcription for later
+        this.transcriptionBuffer.push({ source, text, isFinal });
+        return;
+    }
+    // Existing update logic...
+}
+```
 
 ### Epic 5: User Experience Enhancements
 
@@ -205,19 +272,46 @@ This plan outlines the implementation of a toggle feature for the Yuna Chrome Ex
    - UI manually closed via DOM manipulation
    - Extension updated while UI is visible
 
+4. **Critical Audio Testing** (MUST PASS ALL):
+   - Start transcription with UI visible → Hide UI → Verify audio continues
+   - Start with hidden UI → Begin transcription → Show UI → Verify transcriptions appear
+   - Hide UI during active transcription → Speak → Show UI → Verify buffered transcriptions appear
+   - Test both microphone and tab audio continue working when UI is hidden
+   - Verify WebSocket connections remain stable during UI toggle
+   - Check audio level processing continues even when UI elements don't exist
+
 ## Risk Mitigation
 
 1. **Risk**: Breaking existing transcription functionality
-   - **Mitigation**: Minimal changes to audio pipeline, extensive testing
+   - **Mitigation**: 
+     - No modifications to audio pipeline files (audio-processor.js, audio-worklet-processor.js)
+     - Only modify UI visibility, not audio processing logic
+     - Add comprehensive null checks before UI updates
+     - Test each phase thoroughly before proceeding
 
 2. **Risk**: Race conditions with state management
-   - **Mitigation**: Use atomic storage operations, implement proper locking
+   - **Mitigation**: 
+     - Use atomic storage operations
+     - Check UI existence before operations
+     - Handle case where UI is toggled during initialization
 
 3. **Risk**: UI not appearing when needed
-   - **Mitigation**: Add fallback to show UI if transcription starts
+   - **Mitigation**: 
+     - Force show UI when user clicks "Start encounter" if hidden
+     - Add error recovery if UI creation fails
+     - Log all UI state changes for debugging
 
 4. **Risk**: Confusing user experience
-   - **Mitigation**: Clear visual feedback, intuitive toggle behavior
+   - **Mitigation**: 
+     - Clear visual feedback via badge/notifications
+     - Consistent toggle behavior
+     - Show UI automatically if user starts transcription
+
+5. **Risk**: Audio stream interruption
+   - **Mitigation**:
+     - Never call `stopTranscription()` when hiding UI
+     - Keep all audio objects (streams, processors) alive
+     - Only modify visual elements, not audio elements
 
 ## Success Criteria
 
@@ -230,12 +324,44 @@ This plan outlines the implementation of a toggle feature for the Yuna Chrome Ex
 
 ## Code Safety Notes
 
-- Do not modify any audio processing code in:
-  - audio-processor.js
-  - audio-worklet-processor.js
-  - offscreen.js
-- Maintain all existing WebSocket connections
-- Preserve all Deepgram API interactions
-- Keep service worker lifecycle management intact
+**ABSOLUTE DO NOT MODIFY LIST:**
+- audio-processor.js (handles AudioWorklet setup)
+- audio-worklet-processor.js (PCM extraction logic)
+- offscreen.js (tab audio capture)
+- Any WebSocket connection code in service-worker.js
+- Any Deepgram API interaction code
+- Service worker lifecycle management code
 
-This plan provides a complete roadmap for implementing the extension icon toggle feature while maintaining all existing functionality.
+**SAFE TO MODIFY:**
+- UI visibility logic in content.js and floating-ui.js
+- Chrome storage for UI state
+- Message handlers for UI toggle (new messages only)
+- CSS display properties for showing/hiding
+
+**CRITICAL TESTING CHECKPOINTS:**
+1. After Phase 1: Verify storage works without breaking anything
+2. After Phase 2: Verify audio still initializes without UI
+3. After Phase 3: Full audio test - both streams must work
+4. After Phase 4: Stress test with multiple scenarios
+
+## Implementation Safety Checklist
+
+Before starting each phase, verify:
+- [ ] Current transcription works (test both mic and tab audio)
+- [ ] Create a backup branch from current state
+- [ ] Have browser DevTools open to monitor errors
+
+After each code change:
+- [ ] Test transcription still works
+- [ ] Check browser console for errors
+- [ ] Verify WebSocket connections in service worker console
+
+## Emergency Rollback Plan
+
+If transcription breaks at any point:
+1. `git stash` or `git reset --hard HEAD`
+2. Reload extension in chrome://extensions/
+3. Clear chrome.storage.local if needed
+4. Return to last known working state
+
+This plan provides a complete roadmap for implementing the extension icon toggle feature while maintaining all existing functionality. The risk of breaking transcription is minimized by careful separation of UI and audio concerns.
