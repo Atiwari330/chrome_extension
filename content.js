@@ -9,6 +9,7 @@ class MeetTranscriptionExtension {
         this.micStream = null;
         this.tabStream = null;
         this.audioProcessor = null;
+        this.uiVisible = false; // Track UI visibility state
         
         this.logger.info('Content', 'MeetTranscriptionExtension initialized');
         this.init();
@@ -23,6 +24,9 @@ class MeetTranscriptionExtension {
                 return;
             }
 
+            // Load UI visibility state from storage
+            await this.loadUIVisibilityState();
+
             // Check microphone permission status
             const permissionStatus = await this.checkMicPermission();
             
@@ -31,7 +35,10 @@ class MeetTranscriptionExtension {
                 await this.requestMicPermission();
             } else {
                 this.logger.info('Content', 'Microphone permission already granted');
-                this.createFloatingUI();
+                // Only create UI if it should be visible
+                if (this.uiVisible) {
+                    this.createFloatingUI();
+                }
             }
 
             // Set up DOM mutation observer
@@ -84,6 +91,27 @@ class MeetTranscriptionExtension {
         }
     }
 
+    async loadUIVisibilityState() {
+        try {
+            const result = await chrome.storage.local.get(['uiVisible']);
+            // Default to false (hidden) if not set
+            this.uiVisible = result.uiVisible === true;
+            this.logger.info('Content', `UI visibility state loaded: ${this.uiVisible}`);
+        } catch (error) {
+            this.logger.error('Content', 'Error loading UI visibility state', error);
+            this.uiVisible = false; // Default to hidden on error
+        }
+    }
+
+    async saveUIVisibilityState() {
+        try {
+            await chrome.storage.local.set({ uiVisible: this.uiVisible });
+            this.logger.info('Content', `UI visibility state saved: ${this.uiVisible}`);
+        } catch (error) {
+            this.logger.error('Content', 'Error saving UI visibility state', error);
+        }
+    }
+
     async requestMicPermission() {
         return new Promise((resolve) => {
             // Create hidden iframe for permission request
@@ -111,7 +139,10 @@ class MeetTranscriptionExtension {
                     this.logger.info('Content', 'Permission result received', event.data);
                     
                     if (event.data.granted) {
-                        this.createFloatingUI();
+                        // Only create UI if it should be visible
+                        if (this.uiVisible) {
+                            this.createFloatingUI();
+                        }
                     } else {
                         this.showPermissionError(event.data.error);
                     }
