@@ -450,6 +450,10 @@ class TranscriptionService {
                     if (sender.tab && sender.tab.id) {
                         this.activeTabId = sender.tab.id;
                         console.log('[Service Worker] Active tab ID set:', this.activeTabId);
+                        
+                        // Update badge to show recording status
+                        chrome.action.setBadgeText({ text: 'REC', tabId: sender.tab.id });
+                        chrome.action.setBadgeBackgroundColor({ color: '#EF4444', tabId: sender.tab.id });
                     }
                     
                     // API key is now hardcoded, no need to reload
@@ -599,6 +603,19 @@ class TranscriptionService {
                 
             case 'STOP_TRANSCRIPTION':
                 this.stopTranscription();
+                
+                // Update badge to clear recording status
+                if (sender.tab && sender.tab.id) {
+                    // Check if UI is visible to determine badge
+                    const { uiVisible } = await chrome.storage.local.get(['uiVisible']);
+                    if (uiVisible) {
+                        chrome.action.setBadgeText({ text: '', tabId: sender.tab.id });
+                    } else {
+                        chrome.action.setBadgeText({ text: 'OFF', tabId: sender.tab.id });
+                        chrome.action.setBadgeBackgroundColor({ color: '#9CA3AF', tabId: sender.tab.id });
+                    }
+                }
+                
                 // Close offscreen document if it exists
                 try {
                     await chrome.offscreen.closeDocument();
@@ -751,6 +768,14 @@ chrome.action.onClicked.addListener(async (tab) => {
         console.log('[Service Worker] UI visibility toggled to:', newVisibility);
     } catch (error) {
         console.log('[Service Worker] Error saving UI visibility:', error);
+    }
+    
+    // Update extension badge to show UI state
+    if (newVisibility) {
+        chrome.action.setBadgeText({ text: '', tabId: tab.id });
+    } else {
+        chrome.action.setBadgeText({ text: 'OFF', tabId: tab.id });
+        chrome.action.setBadgeBackgroundColor({ color: '#9CA3AF', tabId: tab.id });
     }
     
     // Notify the tab about both permission grant and UI toggle
